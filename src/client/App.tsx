@@ -93,10 +93,36 @@ function GameVisual({ game, houseEdge, running, result, crashValue, crashPhase, 
       <div className="stage-status">{status}</div>
     </div>;
   }
-  if (game === 'mines') { const total = minesRound?.gridSize ?? minesGridSize; return <div className="visual-stage mines-visual" style={{ '--mine-columns': Math.sqrt(total) } as React.CSSProperties}>{Array.from({ length: total }, (_, i) => { const revealed = minesRound?.revealed?.[i]; const mine = revealed && minesRound?.board?.[i]; return <button key={i} disabled={!minesRound || revealed || minesRound.resolved} onClick={() => onMineClick(i)} className={revealed ? (mine ? 'mine-glow reveal-pop' : 'gem-glow reveal-pop') : ''}>{revealed ? (mine ? '💣' : '💎') : ''}</button>; })}<div className="stage-status">{minesRound ? (minesRound.resolved ? (minesRound.won ? 'CASHED OUT' : 'MINE HIT') : `${minesRound.safeCount} SAFE · ${minesRound.mines} MINES · ${total} TILES`) : `SELECT ${total} TILES AND START`}</div></div>; }
+  if (game === 'mines') {
+    const total = minesRound?.gridSize ?? minesGridSize;
+    const multiplier = minesRound?.safeCount > 0 ? minesPayoutMultiplier(minesRound.mines, minesRound.safeCount, total, houseEdge) : 1;
+    const roundClass = !minesRound ? 'is-ready' : minesRound.resolved ? (minesRound.won ? 'is-won' : 'is-lost') : 'is-active';
+    return <div className={`visual-stage mines-visual ${roundClass}`}>
+      <div className="mines-grid" role="grid" aria-label="Mines board">
+        {Array.from({ length: total }, (_, index) => {
+          const revealed = Boolean(minesRound?.revealed?.[index]);
+          const boardMine = Boolean(minesRound?.board?.[index]);
+          const showMine = Boolean(minesRound?.resolved && boardMine);
+          const safe = revealed && !boardMine;
+          const tileClass = showMine ? `tile-mine ${revealed ? 'was-picked' : 'was-hidden'}` : safe ? 'tile-safe' : 'tile-hidden';
+          return <button
+            type="button"
+            role="gridcell"
+            aria-label={showMine ? `Mine at tile ${index + 1}` : safe ? `Gem at tile ${index + 1}` : `Hidden tile ${index + 1}`}
+            key={index}
+            disabled={!minesRound || revealed || minesRound.resolved}
+            onClick={() => onMineClick(index)}
+            className={tileClass}
+          ><span>{showMine ? '💣' : safe ? '◆' : ''}</span></button>;
+        })}
+      </div>
+      {minesRound && !minesRound.resolved && minesRound.safeCount > 0 && <div className="mines-live-multiplier"><small>Current payout</small><strong>{multiplier.toFixed(2)}×</strong></div>}
+      <div className="stage-status">{minesRound ? (minesRound.resolved ? (minesRound.won ? `CASHED OUT · ${minesRound.payout.toFixed(2)}×` : 'MINE HIT') : `${minesRound.safeCount} GEMS · ${minesRound.mines} MINES`) : 'PLACE A BET TO START'}</div>
+    </div>;
+  }
   if (game === 'wheel') { const colors = ['#e83f5f','#28b7e8','#62df54','#ffc83d','#9b5de5','#ff8a3d']; const uniqueOdds = [...new Set(wheelLayout)].sort((a,b) => a-b); const colorForOdd = (odd:number) => colors[uniqueOdds.indexOf(odd) % colors.length]; return <div className="visual-stage wheel-visual"><div className={`wheel-disc ${running ? 'is-spinning' : ''}`} style={{ background: `conic-gradient(${wheelLayout.map((value, i) => `${colorForOdd(value)} ${i * 360 / wheelSegments}deg ${(i + 1) * 360 / wheelSegments}deg`).join(',')})`, transform: `rotate(${wheelRotation}deg)` }}><span>{!running && result ? `${result.multiplier.toFixed(2)}×` : running ? 'SPIN' : 'READY'}</span></div><div className="wheel-pointer">▼</div><div className="wheel-odds">{uniqueOdds.map(odd=><b key={odd} style={{'--odd-color': colorForOdd(odd)} as React.CSSProperties}>{odd.toFixed(2)}×</b>)}</div><div className="stage-status">{status}</div></div>; }
   if (game === 'keno') { const hits = kenoNumbers.filter(number => kenoPicks.includes(number)).length; const paytable = kenoPayoutTables[kenoRisk][kenoPicks.length] ?? []; return <div className="visual-stage keno-visual"><div className="keno-paytable"><span className="paytable-label">Hits / payout</span>{paytable.map((odd, count) => <div key={count} className={hits === count && kenoNumbers.length === 10 ? 'reached' : ''}><b>{count} hit</b><small>{odd.toFixed(2)}×</small></div>)}</div><div className="keno-play-grid">{Array.from({ length: 40 }, (_, i) => i + 1).map(value => { const selected = kenoPicks.includes(value); const drawn = kenoNumbers.includes(value); return <button key={value} disabled={kenoAnimating} onClick={() => onKenoClick(value)} className={`${selected ? 'selected' : ''} ${drawn ? 'drawn' : ''} ${selected && drawn ? 'hit' : ''}`}>{value}</button>; })}</div><div className="stage-status">{running ? `DRAWING ${kenoNumbers.length}/10 · ${hits} HITS` : `${kenoPicks.length}/10 SELECTED${kenoNumbers.length ? ` · ${hits} HITS` : ''}`}</div></div>; }
-  if (game === 'dice') { const target = diceTargetFromChance(diceChance); const marker = result ? Number(result.details?.roll ?? target) : target; return <div className={`visual-stage dice-visual ${running ? 'is-running' : ''}`}><div className="dice-scale-labels"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div><div className={`range-track ${diceSide}`}><span style={{ left: `${marker}%` }}/><b>{marker.toFixed(2)}</b></div><div className="dice-metrics"><div><small>Multiplier</small><strong>{diceMultiplier(diceChance).toFixed(4)}×</strong></div><div><small>Roll {diceSide === 'over' ? 'Over' : 'Under'}</small><strong>{target.toFixed(2)}</strong></div><div><small>Win Chance</small><strong>{diceChance.toFixed(2)}%</strong></div></div><div className="stage-status">{status}</div></div>; }
+  if (game === 'dice') { const target = diceTargetFromChance(diceChance, diceSide); const marker = result ? Number(result.details?.roll ?? target) : target; return <div className={`visual-stage dice-visual ${running ? 'is-running' : ''}`}><div className="dice-scale-labels"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div><div className={`range-track ${diceSide}`}><span style={{ left: `${marker}%` }}/><b>{marker.toFixed(2)}</b></div><div className="dice-metrics"><div><small>Multiplier</small><strong>{diceMultiplier(diceChance).toFixed(4)}×</strong></div><div><small>Roll {diceSide === 'over' ? 'Over' : 'Under'}</small><strong>{target.toFixed(2)}</strong></div><div><small>Win Chance</small><strong>{diceChance.toFixed(2)}%</strong></div></div><div className="stage-status">{status}</div></div>; }
   if (game === 'limbo') return <div className={`visual-stage limbo-visual ${running ? 'is-running' : ''} ${!running && result ? (result.won ? 'won' : 'lost') : ''}`}><span>{running ? '···' : result ? result.outcome : `${limboTarget.toFixed(2)}×`}</span><div className="orbit one"/><div className="orbit two"/><div className="stage-status">{status}</div></div>;
   if (game === 'blackjack') { const p=(result?.details?.player as number[]|undefined)??[]; const d=(result?.details?.dealer as number[]|undefined)??[]; const card=(n:number)=>n===1?'A':n===11?'J':n===12?'Q':n===13?'K':String(n); return <div className={`visual-stage table-visual ${running?'is-running':''}`}><div className="shoe-stack">▤<small>INFINITE SHOE</small></div><div className="dealer-hand"><small>DEALER <em>{String(result?.details?.dealerTotal??'—')}</em></small><div>{d.map((n,i)=><b key={i} style={{'--deal':i} as React.CSSProperties}>{card(n)}<i>{i%2?'♠':'♥'}</i></b>)}</div></div><div className="felt-mark"><b>BLACKJACK PAYS 3 TO 2</b><span>INSURANCE PAYS 2 TO 1</span></div><div className="player-hand"><small>PLAYER <em>{String(result?.details?.playerTotal??'—')}</em></small><div>{p.map((n,i)=><b key={i} style={{'--deal':i+2} as React.CSSProperties}>{card(n)}<i>{i%2?'♣':'♦'}</i></b>)}</div></div><div className="bet-ring">BET</div><div className="stage-status">{status}</div></div>; }
   if (game === 'rps') { const icons:any={rock:'✊',paper:'✋',scissors:'✌️'}; return <div className={`visual-stage duel-visual ${running?'is-running':''}`}><div className="duel-side player"><small>YOUR HAND</small><b>{icons[String(result?.details?.choice??'rock')]}</b><i>LOCKED</i></div><div className="duel-center"><span>VS</span><em>{result?.multiplier?.toFixed(2)??'2.97'}×</em></div><div className="duel-side house"><small>HOUSE HAND</small><b>{running?'❔':icons[String(result?.details?.opponent??'paper')]}</b><i>{running?'REVEALING':'REVEALED'}</i></div><div className="stage-status">{status}</div></div>; }
@@ -169,7 +195,7 @@ export default function App() {
   const [kenoResult, setKenoResult] = useState<BetResult | null>(null);
   const [kenoMessage, setKenoMessage] = useState('Select 1-10 numbers and place your bet.');
   const [minesCount, setMinesCount] = useState(6);
-  const [minesGridSize, setMinesGridSize] = useState(25);
+  const minesGridSize = 25;
   const [crashAuto, setCrashAuto] = useState(2);
   const [amountInput, setAmountInput] = useState(10);
   const [cashoutError, setCashoutError] = useState<string | null>(null);
@@ -186,6 +212,17 @@ export default function App() {
   const [betMode, setBetMode] = useState<'manual' | 'auto'>('manual');
   const [autoRounds, setAutoRounds] = useState(5);
   const [autoRemaining, setAutoRemaining] = useState(0);
+  const [autoInfinite, setAutoInfinite] = useState(false);
+  const [autoDelay, setAutoDelay] = useState(400);
+  const [autoMinesGems, setAutoMinesGems] = useState(3);
+  const [autoWinIncrease, setAutoWinIncrease] = useState(0);
+  const [autoLossIncrease, setAutoLossIncrease] = useState(0);
+  const [autoStopProfit, setAutoStopProfit] = useState(0);
+  const [autoStopLoss, setAutoStopLoss] = useState(0);
+  const [autoProfit, setAutoProfit] = useState(0);
+  const [autoCompleted, setAutoCompleted] = useState(0);
+  const [autoRunning, setAutoRunning] = useState(false);
+  const [autoStatus, setAutoStatus] = useState('Ready');
   const [rpsChoice, setRpsChoice] = useState<'rock'|'paper'|'scissors'>('rock');
   const [progressDifficulty, setProgressDifficulty] = useState<'easy'|'medium'|'hard'>('medium');
   const [progressTarget, setProgressTarget] = useState(5);
@@ -198,7 +235,11 @@ export default function App() {
     autoStopRef.current = true;
     autoRunIdRef.current += 1;
     autoRunningRef.current = false;
+    setAutoRunning(false);
     setAutoRemaining(0);
+    setAutoProfit(0);
+    setAutoCompleted(0);
+    setAutoStatus('Ready');
     setVisualRunning(false);
     setVisualResult(null);
     setKenoResult(null);
@@ -331,7 +372,7 @@ export default function App() {
   };
 
   const toggleKenoNumber = (value: number) => {
-    if (kenoAnimating) return;
+    if (kenoAnimating || autoRunningRef.current) return;
     setKenoPicks((current) => current.includes(value) ? current.filter((number) => number !== value) : current.length < 10 ? [...current, value] : current);
   };
 
@@ -368,8 +409,9 @@ export default function App() {
   const placeKenoBet = async (amount = amountInput) => {
     setError(null);
     if (kenoPicks.length < 1) {
-      setError('Choose at least one number for Keno.');
-      return;
+      const message = 'Choose at least one number for Keno.';
+      setError(message);
+      throw new Error(message);
     }
 
     try {
@@ -384,9 +426,11 @@ export default function App() {
       const draw = result.details?.draw as number[] ?? [];
       await refreshSession();
       await revealKenoNumbers(draw);
+      return result;
     } catch (err: any) {
       setVisualRunning(false);
       setError(err.message);
+      throw err;
     }
   };
 
@@ -419,6 +463,7 @@ export default function App() {
 
   useEffect(() => {
     if (!crashRound || crashRound.resolved || crashPhase !== 'flying') return;
+    if (autoRunningRef.current && selectedGame === 'crash') return;
     let settling = false;
     const timer = window.setInterval(async () => {
       const elapsed = (Date.now() - new Date(crashRound.startedAt).getTime()) / 1000;
@@ -448,8 +493,10 @@ export default function App() {
   }, [crashRound, crashPhase]);
 
   const startMines = async () => {
+    setError(null);
     try {
-      const payload = await apiFetch<any>('/api/mines/start', { amount: amountInput, mines: minesCount, gridSize: minesGridSize });
+      playTone('start', 'mines');
+      const payload = await apiFetch<any>('/api/mines/start', { amount: amountInput, mines: minesCount });
       setMinesRound(payload.round);
       setMinesSelected([]);
       setVisualResult(null);
@@ -460,14 +507,18 @@ export default function App() {
   };
 
   const revealMine = async (index: number) => {
-    if (!minesRound || minesRound.revealed[index]) return;
+    if (!minesRound || minesRound.resolved || minesRound.revealed[index]) return;
     try {
+      setVisualRunning(true);
       const payload = await apiFetch<any>('/api/mines/reveal', { index });
       setMinesRound(payload.round);
+      setMinesSelected((current) => [...current, index]);
       playTone(payload.round.resolved && !payload.round.won ? 'lose' : payload.round.resolved ? 'win' : 'tick');
       if (payload.round.resolved) setVisualResult({ game: 'mines', outcome: payload.round.won ? 'All safe tiles cleared' : 'Mine hit', won: payload.round.won, payout: payload.round.payout, multiplier: payload.round.payout });
+      window.setTimeout(() => setVisualRunning(false), animationMode === 'instant' ? 0 : 240);
       await refreshSession();
     } catch (err: any) {
+      setVisualRunning(false);
       setError(err.message);
     }
   };
@@ -477,57 +528,162 @@ export default function App() {
       const payload = await apiFetch<any>('/api/mines/cashout', {});
       setMinesRound(payload.round);
       setVisualResult({ game: 'mines', outcome: `Cashed out at ${payload.round.payout.toFixed(2)}x`, won: true, payout: payload.round.payout, multiplier: payload.round.payout });
+      playTone('win', 'mines');
       await refreshSession();
     } catch (err: any) {
       setError(err.message);
     }
   };
 
+  const pause = (duration: number) => new Promise<void>((resolve) => window.setTimeout(resolve, duration));
+
+  const secureChoice = (values: number[]) => {
+    const random = new Uint32Array(1);
+    window.crypto.getRandomValues(random);
+    return values[random[0] % values.length];
+  };
+
+  const runMinesAutoRound = async (amount: number): Promise<BetResult> => {
+    const started = await apiFetch<any>('/api/mines/start', { amount, mines: minesCount });
+    let round = started.round;
+    setMinesRound(round);
+    setMinesSelected([]);
+    setVisualResult(null);
+    playTone('start', 'mines');
+
+    const available = Array.from({ length: 25 }, (_, index) => index);
+    const gemsToReveal = clamp(autoMinesGems, 1, 25 - minesCount);
+    for (let pick = 0; pick < gemsToReveal; pick += 1) {
+      const index = secureChoice(available);
+      available.splice(available.indexOf(index), 1);
+      const response = await apiFetch<any>('/api/mines/reveal', { index });
+      round = response.round;
+      setMinesRound(round);
+      setMinesSelected((current) => [...current, index]);
+      playTone(round.resolved ? 'lose' : 'tick', 'mines');
+      if (animationMode === 'advanced') await pause(260);
+      if (round.resolved) {
+        const result: BetResult = { game: 'mines', outcome: 'Mine hit', won: false, payout: 0, multiplier: 0 };
+        setVisualResult(result);
+        await refreshSession();
+        return result;
+      }
+      if (autoStopRef.current) break;
+    }
+
+    const cashed = await apiFetch<any>('/api/mines/cashout', {});
+    round = cashed.round;
+    setMinesRound(round);
+    const result: BetResult = { game: 'mines', outcome: `Cashed out at ${round.payout.toFixed(2)}x`, won: true, payout: round.payout * amount, multiplier: round.payout };
+    setVisualResult(result);
+    playTone('win', 'mines');
+    await refreshSession();
+    return result;
+  };
+
+  const runCrashAutoRound = async (amount: number): Promise<BetResult> => {
+    const target = Math.max(1.01, crashAuto > 1 ? crashAuto : 2);
+    const started = await apiFetch<any>('/api/crash/start', { amount, autoCashout: target });
+    setCrashRound(started.round);
+    setCrashValue(1);
+    setCrashPhase('flying');
+    playTone('start', 'crash');
+    const finishAt = Math.min(target, Number(started.round.crashPoint ?? target));
+    await pause(Math.log(Math.max(1.01, finishAt)) / .35 * 1000 + 120);
+    const settled = await apiFetch<any>('/api/crash/cashout', {});
+    const round = settled.round;
+    const won = round.payout > 0;
+    setCrashRound(round);
+    setCrashValue(won ? (round.cashedOutAt ?? target) : round.crashPoint);
+    setCrashPhase(won ? 'cashed' : 'busted');
+    playTone(won ? 'win' : 'lose', 'crash');
+    await refreshSession();
+    return { game: 'crash', outcome: `Crash at ${round.crashPoint.toFixed(2)}x`, won, payout: round.payout * amount, multiplier: round.payout };
+  };
+
   const runAutoBets = async () => {
     if (autoRunningRef.current) {
       autoStopRef.current = true;
-      autoRunIdRef.current += 1;
-      autoRunningRef.current = false;
-      setAutoRemaining(0);
+      setAutoStatus('Stopping after current round…');
       return;
     }
+    if (selectedGame === 'mines' && minesRound && !minesRound.resolved) {
+      setError('Cash out or finish the active Mines round before starting Auto Bet.');
+      return;
+    }
+    if (selectedGame === 'crash' && crashRound && !crashRound.resolved) {
+      setError('Finish the active Crash round before starting Auto Bet.');
+      return;
+    }
+
     autoRunningRef.current = true;
     autoStopRef.current = false;
+    setAutoRunning(true);
+    setAutoProfit(0);
+    setAutoCompleted(0);
+    setAutoStatus('Running');
+    setError(null);
     const runId = ++autoRunIdRef.current;
     const game = selectedGame;
-    for (let round = autoRounds; round > 0 && !autoStopRef.current && runId === autoRunIdRef.current; round -= 1) {
-      setAutoRemaining(round);
-      try {
-        if (game === 'dice') await placeBet('dice', { side: diceSide, winChance: diceChance });
-        else if (game === 'limbo') await placeBet('limbo', { target: limboTarget });
-        else if (game === 'plinko') await placeBet('plinko', { rows: plinkoRows, risk: plinkoRisk });
-        else if (game === 'wheel') await placeBet('wheel', { segments: wheelSegments, risk: wheelRisk });
-        else if (game === 'keno') { await placeKenoBet(); await new Promise(resolve => window.setTimeout(resolve, animationMode === 'instant' ? 120 : 950)); }
-        else if (game === 'blackjack') await placeBet('blackjack', {});
-        else if (game === 'rps') await placeBet('rps', { choice: rpsChoice });
-        else if (game === 'tower') await placeBet('tower', { difficulty: progressDifficulty, level: progressTarget });
-        else if (game === 'chicken') await placeBet('chicken', { difficulty: progressDifficulty, step: progressTarget });
-        else if (game === 'mines') {
-          const started = await apiFetch<any>('/api/mines/start', { amount: amountInput, mines: minesCount, gridSize: minesGridSize });
-          setMinesRound(started.round);
-          const index = Math.floor(Math.random() * minesGridSize);
-          const revealed = await apiFetch<any>('/api/mines/reveal', { index });
-          setMinesRound(revealed.round);
-          if (!revealed.round.resolved) { const cashed = await apiFetch<any>('/api/mines/cashout', {}); setMinesRound(cashed.round); }
-          await refreshSession();
-        } else {
-          const target = crashAuto > 1 ? crashAuto : 2;
-          const started = await apiFetch<any>('/api/crash/start', { amount: amountInput, autoCashout: target });
-          setCrashRound(started.round); setCrashValue(1); setCrashPhase('flying');
-          const finishAt = Math.min(target, Number(started.round.crashPoint ?? target));
-          await new Promise(resolve => window.setTimeout(resolve, Math.log(Math.max(1.01, finishAt)) / .35 * 1000 + 650));
-          await refreshSession();
+    const totalRounds = Math.max(1, Math.floor(autoRounds));
+    let completed = 0;
+    let profit = 0;
+    let currentAmount = amountInput;
+    let stopStatus = '';
+
+    try {
+      while (!autoStopRef.current && runId === autoRunIdRef.current && (autoInfinite || completed < totalRounds)) {
+        setAutoRemaining(autoInfinite ? -1 : totalRounds - completed);
+        let result: BetResult;
+        if (game === 'dice') result = await placeBet('dice', { side: diceSide, winChance: diceChance }, currentAmount);
+        else if (game === 'limbo') result = await placeBet('limbo', { target: limboTarget }, currentAmount);
+        else if (game === 'plinko') result = await placeBet('plinko', { rows: plinkoRows, risk: plinkoRisk }, currentAmount);
+        else if (game === 'wheel') result = await placeBet('wheel', { segments: wheelSegments, risk: wheelRisk }, currentAmount);
+        else if (game === 'keno') {
+          result = await placeKenoBet(currentAmount);
+          await pause(animationMode === 'instant' ? 120 : 900);
         }
-      } catch (err: any) { autoStopRef.current = true; setError(`Auto Bet stopped: ${err.message}`); }
-      if (!autoStopRef.current && runId === autoRunIdRef.current) await new Promise(resolve => window.setTimeout(resolve, 250));
+        else if (game === 'blackjack') result = await placeBet('blackjack', {}, currentAmount);
+        else if (game === 'rps') result = await placeBet('rps', { choice: rpsChoice }, currentAmount);
+        else if (game === 'tower') result = await placeBet('tower', { difficulty: progressDifficulty, level: progressTarget }, currentAmount);
+        else if (game === 'chicken') result = await placeBet('chicken', { difficulty: progressDifficulty, step: progressTarget }, currentAmount);
+        else if (game === 'mines') result = await runMinesAutoRound(currentAmount);
+        else result = await runCrashAutoRound(currentAmount);
+
+        const roundProfit = result.won ? currentAmount * (result.multiplier - 1) : -currentAmount;
+        profit = Number((profit + roundProfit).toFixed(2));
+        completed += 1;
+        setAutoProfit(profit);
+        setAutoCompleted(completed);
+        setAutoRemaining(autoInfinite ? -1 : Math.max(0, totalRounds - completed));
+
+        if (autoStopProfit > 0 && profit >= autoStopProfit) {
+          stopStatus = `Profit target reached at ${formatCash(profit)}`;
+          setAutoStatus(stopStatus);
+          autoStopRef.current = true;
+        } else if (autoStopLoss > 0 && profit <= -autoStopLoss) {
+          stopStatus = `Loss limit reached at ${formatCash(Math.abs(profit))}`;
+          setAutoStatus(stopStatus);
+          autoStopRef.current = true;
+        }
+
+        const change = result.won ? autoWinIncrease : autoLossIncrease;
+        if (change > 0) currentAmount = clamp(currentAmount * (1 + change / 100), .1, 10000);
+        setAmountInput(Number(currentAmount.toFixed(2)));
+        if (!autoStopRef.current && (autoInfinite || completed < totalRounds)) await pause(autoDelay);
+      }
+      setAutoStatus(stopStatus || (autoStopRef.current ? 'Stopped' : 'Completed'));
+    } catch (err: any) {
+      autoStopRef.current = true;
+      setAutoStatus('Stopped on error');
+      setError(`Auto Bet stopped: ${err.message}`);
+    } finally {
+      if (runId === autoRunIdRef.current) {
+        autoRunningRef.current = false;
+        setAutoRunning(false);
+        setAutoRemaining(0);
+      }
     }
-    if (runId === autoRunIdRef.current) autoRunningRef.current = false;
-    setAutoRemaining(0);
   };
 
   const verifyLocal = async () => {
@@ -577,6 +733,26 @@ export default function App() {
     if (betFeed === 'high') return results.filter((result) => result.payout >= 20).slice(0, 8);
     return results.slice(0, 8);
   }, [session, betFeed]);
+
+  const renderAutoBetControls = () => <div className="auto-bet-box">
+    <div className="auto-bet-heading"><div><strong>Auto Bet</strong><small>{autoStatus}</small></div><span className={autoProfit >= 0 ? 'positive' : 'negative'}>{autoProfit >= 0 ? '+' : '-'}{formatCash(Math.abs(autoProfit))}</span></div>
+    <div className="auto-fields two-columns">
+      <label><span>Number of bets</span><input className="input" type="number" min="1" max="10000" disabled={autoInfinite || autoRunning} value={autoRounds} onChange={event => setAutoRounds(clamp(Number(event.target.value), 1, 10000))}/></label>
+      <label className="check-field"><span>Run continuously</span><input type="checkbox" checked={autoInfinite} disabled={autoRunning} onChange={event => setAutoInfinite(event.target.checked)}/></label>
+    </div>
+    {selectedGame === 'mines' && <label className="auto-field"><span>Gems per round</span><input className="input" type="number" min="1" max={25 - minesCount} disabled={autoRunning} value={autoMinesGems} onChange={event => setAutoMinesGems(clamp(Number(event.target.value), 1, 25 - minesCount))}/><small>Auto-selects unique tiles, then cashes out after this many safe reveals.</small></label>}
+    <div className="auto-fields two-columns">
+      <label><span>On win · increase bet %</span><input className="input" type="number" min="0" max="1000" disabled={autoRunning} value={autoWinIncrease} onChange={event => setAutoWinIncrease(clamp(Number(event.target.value), 0, 1000))}/></label>
+      <label><span>On loss · increase bet %</span><input className="input" type="number" min="0" max="1000" disabled={autoRunning} value={autoLossIncrease} onChange={event => setAutoLossIncrease(clamp(Number(event.target.value), 0, 1000))}/></label>
+    </div>
+    <div className="auto-fields two-columns">
+      <label><span>Stop on profit</span><input className="input" type="number" min="0" step="0.1" disabled={autoRunning} value={autoStopProfit} onChange={event => setAutoStopProfit(Math.max(0, Number(event.target.value)))}/></label>
+      <label><span>Stop on loss</span><input className="input" type="number" min="0" step="0.1" disabled={autoRunning} value={autoStopLoss} onChange={event => setAutoStopLoss(Math.max(0, Number(event.target.value)))}/></label>
+    </div>
+    <label className="auto-field"><span>Delay between bets · {autoDelay} ms</span><input type="range" min="100" max="3000" step="100" disabled={autoRunning} value={autoDelay} onChange={event => setAutoDelay(Number(event.target.value))}/></label>
+    <div className="auto-progress"><span>{autoCompleted} completed</span><span>{autoRemaining === -1 ? '∞ remaining' : `${autoRemaining} remaining`}</span></div>
+    <button className={`button ${autoRunning ? 'danger' : 'success'}`} onClick={runAutoBets}>{autoRunning ? 'Stop Auto Bet' : 'Start Auto Bet'}</button>
+  </div>;
 
   return (
     <div className={`app-shell ${screen === 'game' ? 'game-mode' : 'lobby-mode'} ${animationMode === 'instant' ? 'animation-instant' : 'animation-advanced'}`}>
@@ -733,7 +909,7 @@ export default function App() {
           </div>
         </section>
 
-        <section className="panel game-board" onClickCapture={(event) => { if ((event.target as HTMLElement).closest('button,input')) playTone('click', selectedGame); }}>
+        <section className={`panel game-board bet-mode-${betMode} ${autoRunning ? 'auto-session-active' : ''}`} onClickCapture={(event) => { if ((event.target as HTMLElement).closest('button,input')) playTone('click', selectedGame); }}>
           <div className="game-header">
             <div>
               <button className="back-link" onClick={() => setScreen('lobby')}>← All games</button>
@@ -766,8 +942,8 @@ export default function App() {
 
           {selectedGame !== 'keno' && <div className="card common-bet-card" style={{ marginTop: '1rem' }}>
             <div className="control-tabs">
-              <button className={betMode === 'manual' ? 'active' : ''} onClick={() => setBetMode('manual')}>Manual</button>
-              <button className={betMode === 'auto' ? 'active' : ''} onClick={() => setBetMode('auto')}>Auto</button>
+              <button disabled={autoRunning} className={betMode === 'manual' ? 'active' : ''} onClick={() => setBetMode('manual')}>Manual</button>
+              <button disabled={autoRunning} className={betMode === 'auto' ? 'active' : ''} onClick={() => setBetMode('auto')}>Auto</button>
             </div>
             <label className="label">Bet amount</label>
             <input
@@ -776,6 +952,7 @@ export default function App() {
               value={amountInput}
               min={0.1}
               step={0.1}
+              disabled={autoRunning}
               onChange={(event) => setAmountInput(Number(event.target.value))}
             />
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
@@ -783,13 +960,14 @@ export default function App() {
                 <button
                   key={value}
                   className="button secondary"
+                  disabled={autoRunning}
                   onClick={() => setAmountInput(clamp(amountInput * value, 0.1, 10000))}
                 >
                   {value}×
                 </button>
               ))}
             </div>
-            {betMode === 'auto' && <div className="auto-bet-box"><label className="label">Number of bets</label><input className="input" type="number" min="1" max="100" value={autoRounds} onChange={event => setAutoRounds(clamp(Number(event.target.value),1,100))}/><button className={`button ${autoRemaining ? 'danger' : 'success'}`} onClick={runAutoBets}>{autoRemaining ? `Stop Auto · ${autoRemaining} left` : 'Start Auto Bet'}</button></div>}
+            {betMode === 'auto' && renderAutoBetControls()}
           </div>}
 
           {selectedGame === 'dice' && (
@@ -901,30 +1079,16 @@ export default function App() {
           )}
 
           {selectedGame === 'mines' && (
-            <div className="card" style={{ marginTop: '1rem' }}>
-              <label className="label">Grid size</label>
-              <div className="toggle-group mine-size-options">
-                {[25, 36, 49, 64].map((size) => <button key={size} disabled={Boolean(minesRound && !minesRound.resolved)} className={`toggle-button ${minesGridSize === size ? 'active' : ''}`} onClick={() => { setMinesGridSize(size); setMinesCount(Math.min(minesCount, size - 1)); }}>{size}</button>)}
+            <div className="card mines-controls" style={{ marginTop: '1rem' }}>
+              <div className="mines-settings-row">
+                <label><span>Number of mines</span><select className="input" disabled={autoRunning || Boolean(minesRound && !minesRound.resolved)} value={minesCount} onChange={(event) => { const count = Number(event.target.value); setMinesCount(count); setAutoMinesGems((current) => Math.min(current, 25 - count)); }}>{Array.from({ length: 24 }, (_, index) => index + 1).map(count => <option value={count} key={count}>{count}</option>)}</select></label>
+                <label><span>Gems</span><div className="mine-readonly">{25 - minesCount}</div></label>
               </div>
-              <label className="label" style={{ marginTop: '0.75rem' }}>Number of mines</label>
-              <input
-                type="range"
-                value={minesCount}
-                min={1}
-                max={minesGridSize - 1}
-                onChange={(event) => setMinesCount(Number(event.target.value))}
-              />
-              <div className="mine-count-label"><span>💎 {minesGridSize - minesCount} gems</span><strong>{minesCount} mines 💣</strong></div>
-              <button className="button success" style={{ marginTop: '1rem' }} onClick={startMines}>
-                Place Demo Bet
-              </button>
-              {minesRound && (
-                <div style={{ marginTop: '1rem' }}>
-                  <button className="button" style={{ marginTop: '1rem' }} onClick={cashoutMines} disabled={minesRound.safeCount < 1 || minesRound.resolved}>
-                    Cash out {minesRound.safeCount >= 1 ? `@ ${computeMinesPayoutMultiplier(minesRound.mines, minesRound.safeCount, minesRound.gridSize).toFixed(2)}x` : ''}
-                  </button>
-                </div>
-              )}
+              <div className="mine-count-label"><span>5 × 5 grid</span><strong>{minesCount} mine{minesCount === 1 ? '' : 's'} · {25 - minesCount} gems</strong></div>
+              {minesRound && !minesRound.resolved && <div className="mines-payout-preview"><span>Next gem</span><strong>{computeMinesPayoutMultiplier(minesRound.mines, minesRound.safeCount + 1, 25).toFixed(2)}×</strong></div>}
+              {betMode === 'manual' && (!minesRound || minesRound.resolved) && <button className="button success primary-game-action" disabled={autoRunning} onClick={startMines}>Bet</button>}
+              {betMode === 'manual' && minesRound && !minesRound.resolved && <button className="button success primary-game-action" onClick={cashoutMines} disabled={minesRound.safeCount < 1}>Cash Out{minesRound.safeCount >= 1 ? ` · ${computeMinesPayoutMultiplier(minesRound.mines, minesRound.safeCount, 25).toFixed(2)}×` : ''}</button>}
+              <p className="mines-help">Every gem increases the multiplier. Cash out at any time before hitting a mine.</p>
             </div>
           )}
 
@@ -969,13 +1133,13 @@ export default function App() {
           {selectedGame === 'keno' && (
             <div className="keno-panel">
               <div className="keno-sidebar card">
-                <div className="control-tabs"><button className={betMode === 'manual' ? 'active' : ''} onClick={() => setBetMode('manual')}>Manual</button><button className={betMode === 'auto' ? 'active' : ''} onClick={() => setBetMode('auto')}>Auto</button></div>
+                <div className="control-tabs"><button disabled={autoRunning} className={betMode === 'manual' ? 'active' : ''} onClick={() => setBetMode('manual')}>Manual</button><button disabled={autoRunning} className={betMode === 'auto' ? 'active' : ''} onClick={() => setBetMode('auto')}>Auto</button></div>
                 <div className="keno-bet-amount">
                   <label className="label">Bet amount</label>
                   <div className="keno-amount-row">
-                    <input type="number" className="input" value={amountInput} min={0.1} step={0.1} onChange={(event) => setAmountInput(Number(event.target.value))}/>
-                    <button className="button secondary" onClick={() => setAmountInput(clamp(amountInput / 2, .1, 10000))}>½</button>
-                    <button className="button secondary" onClick={() => setAmountInput(clamp(amountInput * 2, .1, 10000))}>2×</button>
+                    <input type="number" className="input" disabled={autoRunning} value={amountInput} min={0.1} step={0.1} onChange={(event) => setAmountInput(Number(event.target.value))}/>
+                    <button className="button secondary" disabled={autoRunning} onClick={() => setAmountInput(clamp(amountInput / 2, .1, 10000))}>½</button>
+                    <button className="button secondary" disabled={autoRunning} onClick={() => setAmountInput(clamp(amountInput * 2, .1, 10000))}>2×</button>
                   </div>
                 </div>
                 <div>
@@ -984,6 +1148,7 @@ export default function App() {
                     {kenoRiskOptions.map((option) => (
                       <button
                         key={option}
+                        disabled={autoRunning}
                         className={`toggle-button ${kenoRisk === option ? 'active' : ''}`}
                         onClick={() => setKenoRisk(option)}
                       >
@@ -997,8 +1162,8 @@ export default function App() {
                   <p className="small-text">Pick numbers</p>
                   <p className="label" style={{ marginTop: '0.5rem' }}>Tap 1-10 tiles</p>
                   <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginTop: '1rem' }}>
-                    <button className="button" style={{ flex: 1 }} onClick={autoPickKeno}>Auto Pick</button>
-                    <button className="button secondary" style={{ flex: 1 }} onClick={clearKeno}>Clear Table</button>
+                    <button className="button" disabled={autoRunning} style={{ flex: 1 }} onClick={autoPickKeno}>Auto Pick</button>
+                    <button className="button secondary" disabled={autoRunning} style={{ flex: 1 }} onClick={clearKeno}>Clear Table</button>
                   </div>
                 </div>
 
@@ -1012,15 +1177,15 @@ export default function App() {
                 </div>
 
                 <div style={{ marginTop: '1.5rem' }}>
-                  <button
+                  {betMode === 'manual' && <button
                     className="button success"
                     style={{ width: '100%' }}
                     onClick={() => placeKenoBet()}
-                    disabled={kenoPicks.length < 1 || kenoAnimating}
+                    disabled={autoRunning || kenoPicks.length < 1 || kenoAnimating}
                   >
                     {kenoAnimating ? 'Drawing...' : 'Place Bet'}
-                  </button>
-                  {betMode === 'auto' && <div className="auto-bet-box"><label className="label">Number of bets</label><input className="input" type="number" min="1" max="100" value={autoRounds} onChange={event => setAutoRounds(clamp(Number(event.target.value),1,100))}/><button className={`button ${autoRemaining ? 'danger' : 'success'}`} onClick={runAutoBets}>{autoRemaining ? `Stop · ${autoRemaining} left` : 'Start Auto Bet'}</button></div>}
+                  </button>}
+                  {betMode === 'auto' && renderAutoBetControls()}
                 </div>
 
                 <div style={{ marginTop: '1.5rem' }}>

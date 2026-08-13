@@ -22,11 +22,12 @@ import type { BetResult, CrashRound, MineRound, GameType, PlatformConfig } from 
 const app = express();
 const sessions = new Map<string, any>();
 const SESSION_COOKIE = 'originals_session';
-const PORT = 4174;
+const PORT = Number(process.env.PORT ?? 4174);
 const gameTypes: GameType[] = ['dice', 'limbo', 'crash', 'plinko', 'mines', 'wheel', 'keno', 'blackjack', 'rps', 'tower', 'chicken'];
 const defaultGameConfig = { enabled: true, houseEdge: 0.01, minBet: 0.1, maxBet: 1000, maxPayout: 100000 };
 let platformConfig: PlatformConfig = { version: 1, updatedAt: new Date().toISOString(), games: Object.fromEntries(gameTypes.map(game => [game, { ...defaultGameConfig }])) as PlatformConfig['games'] };
 const configAudit: Array<{ version: number; updatedAt: string; summary: string }> = [{ version: 1, updatedAt: platformConfig.updatedAt, summary: 'Default configuration' }];
+const money = (value: number) => Number(value.toFixed(2));
 
 const clientDist = path.resolve('dist');
 app.use(express.static(clientDist));
@@ -68,6 +69,24 @@ async function initSession(session: any) {
 function flushRecent(session: any, result: BetResult) {
   session.recentResults.unshift(result);
   session.recentResults = session.recentResults.slice(0, 16);
+}
+
+function publicMineRound(round: MineRound) {
+  return {
+    id: round.id,
+    bet: round.bet,
+    mines: round.mines,
+    gridSize: round.gridSize,
+    revealed: [...round.revealed],
+    safeCount: round.safeCount,
+    startedAt: round.startedAt,
+    resolved: round.resolved,
+    won: round.won,
+    payout: round.payout,
+    // Keep the committed board server-side until the round is finished. Once
+    // resolved it is returned so the client can reveal and verify every mine.
+    board: round.resolved ? [...round.board] : undefined
+  };
 }
 
 app.use(express.json());
@@ -119,8 +138,23 @@ app.post('/api/rotate-seed', async (req, res) => {
 function validateStake(game: GameType, amount: number, balance: number) {
   const config = platformConfig.games[game];
   if (!config.enabled) throw new Error(`${game} is temporarily disabled`);
+  if (!Number.isFinite(amount)) throw new Error('Bet amount must be a valid number');
   if (amount < config.minBet || amount > config.maxBet || amount > balance) throw new Error(`Bet must be between ${config.minBet} and ${config.maxBet}`);
   return config;
+}
+
+function validateBetParams(game: GameType, params: any) {
+  const finite = (value: unknown) => typeof value === 'number' && Number.isFinite(value);
+  if (game === 'dice' && (!['over', 'under'].includes(params.side) || !finite(params.winChance) || params.winChance < 0.01 || params.winChance > 98)) throw new Error('Invalid Dice settings');
+  if (game === 'limbo' && (!finite(params.target) || params.target < 1.01 || params.target > MAX_PAYOUT_MULTIPLIER)) throw new Error('Invalid Limbo target');
+  if (game === 'plinko' && (!Number.isInteger(params.rows) || params.rows < 8 || params.rows > 16 || !['low', 'medium', 'high', 'rain'].includes(params.risk))) throw new Error('Invalid Plinko settings');
+  if (game === 'wheel' && (![8, 10, 12, 16, 20, 30, 40, 50].includes(params.segments) || !['low', 'medium', 'high'].includes(params.risk))) throw new Error('Invalid Wheel settings');
+  if (game === 'keno') {
+    const picks = params.picks;
+    if (!Array.isArray(picks) || picks.length < 1 || picks.length > 10 || new Set(picks).size !== picks.length || picks.some((value: unknown) => !Number.isInteger(value) || Number(value) < 1 || Number(value) > 40) || !['classic', 'low', 'medium', 'high'].includes(params.risk)) throw new Error('Invalid Keno settings');
+  }
+  if (game === 'rps' && !['rock', 'paper', 'scissors'].includes(params.choice)) throw new Error('Invalid hand');
+  if ((game === 'tower' || game === 'chicken') && !['easy', 'medium', 'hard'].includes(params.difficulty)) throw new Error('Invalid difficulty');
 }
 
 async function runBet(session: any, game: GameType, betFn: Promise<BetResult>, amount: number) {
@@ -129,10 +163,10 @@ async function runBet(session: any, game: GameType, betFn: Promise<BetResult>, a
     throw new Error('Invalid bet amount');
   }
   const result = await betFn;
-  session.balance -= amount;
-  const payout = Math.min(result.payout * amount, config.maxPayout, MAX_PAYOUT_MULTIPLIER * amount);
+  session.balance = money(session.balance - amount);
+  const payout = money(Math.min(result.payout * amount, config.maxPayout, MAX_PAYOUT_MULTIPLIER * amount));
   if (result.won) {
-    session.balance += payout;
+    session.balance = money(session.balance + payout);
   }
   flushRecent(session, { ...result, payout });
   session.nonce += 1;
@@ -167,6 +201,7 @@ app.post('/api/bet', async (req, res) => {
     return res.status(400).json({ error: 'Invalid bet request' });
   }
   try {
+    validateBetParams(game as GameType, params);
     let result: BetResult;
     switch (game) {
       case 'dice':
@@ -205,6 +240,9 @@ app.post('/api/crash/start', async (req, res) => {
   if (typeof amount !== 'number' || amount <= 0 || amount > session.balance) {
     return res.status(400).json({ error: 'Invalid amount' });
   }
+  if (autoCashout !== undefined && (typeof autoCashout !== 'number' || !Number.isFinite(autoCashout) || autoCashout < 1.01 || autoCashout > MAX_PAYOUT_MULTIPLIER)) {
+    return res.status(400).json({ error: 'Invalid auto cashout target' });
+  }
   if (session.crashRound && !session.crashRound.resolved) {
     return res.status(400).json({ error: 'Crash round already in progress' });
   }
@@ -219,7 +257,7 @@ app.post('/api/crash/start', async (req, res) => {
     payout: 0
   };
   session.crashRound = round;
-  session.balance -= amount;
+  session.balance = money(session.balance - amount);
   session.nonce += 1;
   // The demo client uses the committed point to synchronize its real-time curve and burst animation.
   const publicRound = { id: round.id, bet: round.bet, autoCashout: round.autoCashout, crashPoint: round.crashPoint, startedAt: round.startedAt, resolved: round.resolved, payout: round.payout };
@@ -240,7 +278,7 @@ app.post('/api/crash/cashout', (req, res) => {
   let payout = 0;
   if (!crashed) {
     payout = won ? Math.min(cashoutAt, round.crashPoint) : 0;
-    session.balance += payout * round.bet;
+    session.balance = money(session.balance + payout * round.bet);
   }
   round.resolved = true;
   round.cashedOutAt = cashoutAt;
@@ -249,7 +287,7 @@ app.post('/api/crash/cashout', (req, res) => {
     game: 'crash',
     outcome: `Crash at ${round.crashPoint.toFixed(2)}x`,
     won: !crashed && cashoutAt < round.crashPoint,
-    payout,
+    payout: money(payout * round.bet),
     multiplier: payout,
     details: { crashPoint: round.crashPoint, cashoutAt, crashed }
   };
@@ -259,15 +297,13 @@ app.post('/api/crash/cashout', (req, res) => {
 
 app.post('/api/mines/start', async (req, res) => {
   const session = (req as any).session;
-  const { amount, mines, gridSize = 25 } = req.body;
+  const { amount, mines } = req.body;
+  const gridSize = 25;
   try { validateStake('mines', amount, session.balance); } catch (error: any) { return res.status(400).json({ error: error.message }); }
   if (typeof amount !== 'number' || amount <= 0 || amount > session.balance) {
     return res.status(400).json({ error: 'Invalid amount' });
   }
-  if (![25, 36, 49, 64].includes(gridSize)) {
-    return res.status(400).json({ error: 'Invalid grid size' });
-  }
-  if (typeof mines !== 'number' || mines < 1 || mines >= gridSize) {
+  if (!Number.isInteger(mines) || mines < 1 || mines >= gridSize) {
     return res.status(400).json({ error: 'Invalid mine count' });
   }
   const board = await minesBoard(session.serverSeed, session.clientSeed, session.nonce, mines, gridSize);
@@ -285,9 +321,9 @@ app.post('/api/mines/start', async (req, res) => {
     payout: 0
   };
   session.mineRound = round;
-  session.balance -= amount;
+  session.balance = money(session.balance - amount);
   session.nonce += 1;
-  return res.json({ round, balance: session.balance, nonce: session.nonce });
+  return res.json({ round: publicMineRound(round), balance: session.balance, nonce: session.nonce });
 });
 
 app.post('/api/mines/reveal', async (req, res) => {
@@ -315,7 +351,7 @@ app.post('/api/mines/reveal', async (req, res) => {
       details: { index }
     };
     flushRecent(session, result);
-    return res.json({ round, balance: session.balance });
+    return res.json({ round: publicMineRound(round), balance: session.balance });
   }
   const safeReveals = round.revealed.filter((revealed: boolean, idx: number) => revealed && !round.board[idx]).length;
   round.safeCount = safeReveals;
@@ -324,19 +360,19 @@ app.post('/api/mines/reveal', async (req, res) => {
   if (safeReveals === round.gridSize - round.mines) {
     round.resolved = true;
     round.won = true;
-    session.balance += multiplier * round.bet;
+    session.balance = money(session.balance + multiplier * round.bet);
     const result: BetResult = {
       game: 'mines',
       outcome: 'Cleared all safe tiles',
       won: true,
-      payout: multiplier,
+      payout: money(multiplier * round.bet),
       multiplier,
       details: { safeReveals }
     };
     flushRecent(session, result);
-    return res.json({ round, balance: session.balance });
+    return res.json({ round: publicMineRound(round), balance: session.balance });
   }
-  return res.json({ round, balance: session.balance });
+  return res.json({ round: publicMineRound(round), balance: session.balance });
 });
 
 app.post('/api/mines/cashout', (req, res) => {
@@ -353,17 +389,17 @@ app.post('/api/mines/cashout', (req, res) => {
   round.resolved = true;
   round.won = true;
   round.payout = multiplier;
-  session.balance += multiplier * round.bet;
+  session.balance = money(session.balance + multiplier * round.bet);
   const result: BetResult = {
     game: 'mines',
     outcome: `Cashed out at ${multiplier.toFixed(2)}x`,
     won: true,
-    payout: multiplier,
+    payout: money(multiplier * round.bet),
     multiplier,
     details: { safeReveals }
   };
   flushRecent(session, result);
-  return res.json({ round, balance: session.balance });
+  return res.json({ round: publicMineRound(round), balance: session.balance });
 });
 
 app.get('*', (req, res) => {

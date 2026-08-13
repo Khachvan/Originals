@@ -96,10 +96,9 @@ export interface BetResult {
   details?: Record<string, unknown>;
 }
 
-export function diceTargetFromChance(winChance: number): number {
-  const probability = Math.min(1, Math.max(DICE_MIN_CHANCE / 100, winChance / 100));
-  const target = probability * 100;
-  return Math.min(100, Math.max(0, target));
+export function diceTargetFromChance(winChance: number, side: DiceSide = 'under'): number {
+  const chance = Math.min(DICE_MAX_CHANCE, Math.max(DICE_MIN_CHANCE, winChance));
+  return side === 'over' ? 100 - chance : chance;
 }
 
 export function diceMultiplier(winChance: number, houseEdge = HOUSE_EDGE): number {
@@ -113,7 +112,7 @@ export function extractDiceRoll(f: number): number {
 
 export function diceOutcome(f: number, params: DiceParams, houseEdge = HOUSE_EDGE): BetResult {
   const roll = extractDiceRoll(f);
-  const target = diceTargetFromChance(params.winChance);
+  const target = diceTargetFromChance(params.winChance, params.side);
   const win = params.side === 'over' ? roll > target : roll < target;
   return {
     game: 'dice',
