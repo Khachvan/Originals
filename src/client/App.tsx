@@ -62,7 +62,14 @@ const gameThemes: Record<GameType, { kicker: string; tone: string; players: stri
   chicken: { kicker: 'Cross or cash out', tone: 'gold', players: '8.6K playing' }
 };
 
-function GameVisual({ game, houseEdge, running, result, blackjackRound, blackjackDealerVisibleCount, crashValue, crashPhase, minesRound, minesGridSize, kenoNumbers, kenoRisk, wheelSegments, wheelLayout, wheelRotation, limboTarget, plinkoRows, plinkoRisk, diceChance, diceSide, kenoPicks, kenoAnimating, onMineClick, onKenoClick }: { game: GameType; houseEdge: number; running: boolean; result: BetResult | null; blackjackRound: BlackjackRound | null; blackjackDealerVisibleCount: number | null; crashValue: number; crashPhase: string; minesRound: any; minesGridSize: number; kenoNumbers: number[]; kenoRisk: 'classic' | 'low' | 'medium' | 'high'; wheelSegments: number; wheelLayout: number[]; wheelRotation: number; limboTarget: number; plinkoRows: number; plinkoRisk: 'low' | 'medium' | 'high' | 'rain'; diceChance: number; diceSide: 'over' | 'under'; kenoPicks: number[]; kenoAnimating: boolean; onMineClick: (index: number) => void; onKenoClick: (value: number) => void }) {
+function BlackjackActionIcon({ action }: { action: BlackjackAction }) {
+  if (action === 'hit') return <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="5" y="4" width="16" height="22" rx="3"/><path d="M20 11h8M24 7v8"/></svg>;
+  if (action === 'stand') return <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M9 15V8a2 2 0 0 1 4 0v6-8a2 2 0 0 1 4 0v8-6a2 2 0 0 1 4 0v7-4a2 2 0 0 1 4 0v8c0 6-4 10-10 10h-1c-4 0-7-2-9-6l-2-5a2.2 2.2 0 0 1 4-2l2 3"/></svg>;
+  if (action === 'double') return <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="4" y="7" width="15" height="20" rx="3"/><rect x="13" y="4" width="15" height="20" rx="3"/><path d="M18 11h5M20.5 8.5v5"/></svg>;
+  return <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="7" width="11" height="18" rx="2"/><rect x="18" y="7" width="11" height="18" rx="2"/><path d="M11 4 7 1 3 4M21 4l4-3 4 3"/></svg>;
+}
+
+function GameVisual({ game, houseEdge, running, result, blackjackRound, blackjackDealerVisibleCount, blackjackInitialDealAnimating, crashValue, crashPhase, minesRound, minesGridSize, kenoNumbers, kenoRisk, wheelSegments, wheelLayout, wheelRotation, limboTarget, plinkoRows, plinkoRisk, diceChance, diceSide, kenoPicks, kenoAnimating, onMineClick, onKenoClick }: { game: GameType; houseEdge: number; running: boolean; result: BetResult | null; blackjackRound: BlackjackRound | null; blackjackDealerVisibleCount: number | null; blackjackInitialDealAnimating: boolean; crashValue: number; crashPhase: string; minesRound: any; minesGridSize: number; kenoNumbers: number[]; kenoRisk: 'classic' | 'low' | 'medium' | 'high'; wheelSegments: number; wheelLayout: number[]; wheelRotation: number; limboTarget: number; plinkoRows: number; plinkoRisk: 'low' | 'medium' | 'high' | 'rain'; diceChance: number; diceSide: 'over' | 'under'; kenoPicks: number[]; kenoAnimating: boolean; onMineClick: (index: number) => void; onKenoClick: (value: number) => void }) {
   const status = running ? 'BET IN PLAY' : result ? `${result.won ? 'WIN' : 'LOSS'} · ${result.outcome}` : 'READY';
   if (game === 'plinko') {
     const bucket = Number(result?.details?.bucketIndex ?? Math.floor(plinkoRows / 2));
@@ -138,7 +145,7 @@ function GameVisual({ game, houseEdge, running, result, blackjackRound, blackjac
         {(item.hidden || motion === 'reveal') && <span className="card-back-mark" aria-hidden="true">O</span>}
       </b>;
     };
-    const initialDeal = blackjackRound?.version === 1 && blackjackRound.phase !== 'settled';
+    const initialDeal = blackjackInitialDealAnimating && blackjackRound?.version === 1 && blackjackRound.phase !== 'settled';
     const dealerCard = (item: BlackjackCardView, index: number) => {
       if (initialDeal) return card(item, index, index * 2 + 1, 'deal', `dealer-card-${index}`);
       if (blackjackRound?.phase === 'settled' && index === 1) return card(item, index, 0, 'reveal', `dealer-card-${index}`);
@@ -166,6 +173,7 @@ function GameVisual({ game, houseEdge, running, result, blackjackRound, blackjac
         </div>)}
         {!blackjackRound && <div className="player-hand empty-hand"><small>PLAYER <em>—</em></small><div><span>Deal to begin</span></div></div>}
       </div>
+      {blackjackRound?.phase === 'settled' && <div className={`blackjack-result-toast ${blackjackRound.net > 0 ? 'win' : blackjackRound.net < 0 ? 'loss' : 'push'}`} role="status"><span>{blackjackRound.net > 0 ? 'WIN' : blackjackRound.net < 0 ? 'LOSS' : 'PUSH'}</span><strong>{blackjackRound.net > 0 ? '+' : ''}{formatCash(blackjackRound.net)}</strong></div>}
       <div className="bet-ring">BET</div><div className="stage-status">{tableStatus}</div>
     </div>;
   }
@@ -248,6 +256,7 @@ export default function App() {
   const [blackjackRound, setBlackjackRound] = useState<BlackjackRound | null>(null);
   const [blackjackBusy, setBlackjackBusy] = useState(false);
   const [blackjackDealerVisibleCount, setBlackjackDealerVisibleCount] = useState<number | null>(null);
+  const [blackjackInitialDealAnimating, setBlackjackInitialDealAnimating] = useState(false);
   const blackjackAnimationRunRef = useRef(0);
   const [minesSelected, setMinesSelected] = useState<number[]>([]);
   const [visualRunning, setVisualRunning] = useState(false);
@@ -330,14 +339,16 @@ export default function App() {
   useEffect(() => { apiFetch<PlatformConfig>('/api/config').then(config => { setPlatformConfig(config); setAdminDraft(structuredClone(config)); }).catch(() => undefined); }, []);
 
   useEffect(() => {
-    if (selectedGame !== 'blackjack') return;
+    if (selectedGame !== 'blackjack' || screen !== 'game') return;
     apiFetch<{round: BlackjackRound | null; balance: number; nonce: number}>('/api/blackjack/state')
       .then(payload => {
-        setBlackjackRound(payload.round);
+        setBlackjackInitialDealAnimating(false);
+        setBlackjackRound(payload.round?.phase === 'settled' ? null : payload.round);
+        setBlackjackDealerVisibleCount(null);
         setSession(current => current ? { ...current, balance: payload.balance, nonce: payload.nonce } : current);
       })
       .catch((err: Error) => setError(err.message));
-  }, [selectedGame]);
+  }, [selectedGame, screen]);
 
   const openBackoffice = async () => {
     const payload = await apiFetch<{config: PlatformConfig; audit: typeof adminAudit}>('/api/admin/config');
@@ -451,6 +462,7 @@ export default function App() {
   const startBlackjack = async () => {
     setError(null);
     setBlackjackBusy(true);
+    setBlackjackInitialDealAnimating(true);
     setVisualRunning(true);
     playTone('start', 'blackjack');
     try {
@@ -464,6 +476,7 @@ export default function App() {
         if (recovered.round) setBlackjackRound(recovered.round);
       } catch { /* retain the original action error */ }
     } finally {
+      setBlackjackInitialDealAnimating(false);
       setVisualRunning(false);
       setBlackjackBusy(false);
     }
@@ -864,6 +877,15 @@ export default function App() {
   const dashboardClass = view === 'mobile' ? 'main-grid mobile' : 'main-grid';
 
   const selectedGameItem = gameList.find((item) => item.type === selectedGame);
+  const selectGame = (game: GameType, open = false) => {
+    if (game === 'blackjack' && blackjackRound?.phase === 'settled') {
+      setBlackjackRound(null);
+      setBlackjackDealerVisibleCount(null);
+      setBlackjackInitialDealAnimating(false);
+    }
+    setSelectedGame(game);
+    if (open) setScreen('game');
+  };
   const plinkoLayout = useMemo(() => generatePlinkoPayout(plinkoRows, plinkoRisk, platformConfig?.games.plinko.houseEdge ?? .01), [plinkoRows, plinkoRisk, platformConfig]);
   const wheelLayout = useMemo(() => generateWheelLayout(wheelSegments, wheelRisk, platformConfig?.games.wheel.houseEdge ?? .01), [wheelSegments, wheelRisk, platformConfig]);
   const kenoTable = useMemo(() => generateKenoTable(kenoRisk, platformConfig?.games.keno.houseEdge ?? .01)[kenoPicks.length] ?? [], [kenoRisk, kenoPicks.length, platformConfig]);
@@ -966,7 +988,7 @@ export default function App() {
             <div className="section-heading"><span className="pulse-dot"/>Recent wins</div>
             <div className="wins-track">
               {(session?.recentResults.length ? session.recentResults.slice(0, 7) : gameList.slice(0, 7).map((game, index) => ({ game: game.type, won: index % 3 !== 0, payout: 12.4 + index * 17.83 } as BetResult))).map((result, index) => (
-                <button key={index} onClick={() => { setSelectedGame(result.game); setScreen('game'); }}><i>{gameIcons[result.game]}</i><span><b>{gameList.find(game => game.type === result.game)?.label}</b><small>{result.won ? `+$${result.payout.toFixed(2)}` : 'Played now'}</small></span></button>
+                <button key={index} onClick={() => selectGame(result.game, true)}><i>{gameIcons[result.game]}</i><span><b>{gameList.find(game => game.type === result.game)?.label}</b><small>{result.won ? `+$${result.payout.toFixed(2)}` : 'Played now'}</small></span></button>
               ))}
             </div>
           </section>
@@ -985,7 +1007,7 @@ export default function App() {
 
           <section className="lobby-game-grid">
             {visibleGames.map((game, index) => (
-              <button className={`lobby-game-card ${gameThemes[game.type].tone}`} key={game.type} onClick={() => { setSelectedGame(game.type); setScreen('game'); }}>
+              <button className={`lobby-game-card ${gameThemes[game.type].tone}`} key={game.type} onClick={() => selectGame(game.type, true)}>
                 <div className="card-shine" />
                 <span className="game-number">0{index + 1}</span>
                 <div className="lobby-card-art"><span>{gameIcons[game.type]}</span><i /></div>
@@ -1024,7 +1046,7 @@ export default function App() {
               <button
                 key={game.type}
                 className={`game-card ${selectedGame === game.type ? 'active' : ''}`}
-                onClick={() => setSelectedGame(game.type)}
+                onClick={() => selectGame(game.type)}
               >
                 <div className="game-icon">{gameIcons[game.type]}</div>
                 <div className="game-card-body">
@@ -1088,13 +1110,13 @@ export default function App() {
             </div>
           ) : null}
 
-          <GameVisual game={selectedGame} houseEdge={platformConfig?.games[selectedGame].houseEdge ?? .01} running={visualRunning || kenoAnimating} result={selectedGame === 'keno' ? kenoResult : visualResult} blackjackRound={blackjackRound} blackjackDealerVisibleCount={blackjackDealerVisibleCount} crashValue={crashValue} crashPhase={crashPhase} minesRound={minesRound} minesGridSize={minesGridSize} kenoNumbers={kenoDrawReveal} kenoRisk={kenoRisk} wheelSegments={wheelSegments} wheelLayout={wheelLayout} wheelRotation={wheelRotation} limboTarget={limboTarget} plinkoRows={plinkoRows} plinkoRisk={plinkoRisk} diceChance={diceChance} diceSide={diceSide} kenoPicks={kenoPicks} kenoAnimating={kenoAnimating} onMineClick={revealMine} onKenoClick={toggleKenoNumber} />
+          <GameVisual game={selectedGame} houseEdge={platformConfig?.games[selectedGame].houseEdge ?? .01} running={visualRunning || kenoAnimating} result={selectedGame === 'keno' ? kenoResult : visualResult} blackjackRound={blackjackRound} blackjackDealerVisibleCount={blackjackDealerVisibleCount} blackjackInitialDealAnimating={blackjackInitialDealAnimating} crashValue={crashValue} crashPhase={crashPhase} minesRound={minesRound} minesGridSize={minesGridSize} kenoNumbers={kenoDrawReveal} kenoRisk={kenoRisk} wheelSegments={wheelSegments} wheelLayout={wheelLayout} wheelRotation={wheelRotation} limboTarget={limboTarget} plinkoRows={plinkoRows} plinkoRisk={plinkoRisk} diceChance={diceChance} diceSide={diceSide} kenoPicks={kenoPicks} kenoAnimating={kenoAnimating} onMineClick={revealMine} onKenoClick={toggleKenoNumber} />
 
-          {selectedGame !== 'keno' && <div className="card common-bet-card" style={{ marginTop: '1rem' }}>
-            <div className="control-tabs">
+          {selectedGame !== 'keno' && <div className={`card common-bet-card ${selectedGame === 'blackjack' ? 'blackjack-bet-card' : ''}`} style={{ marginTop: '1rem' }}>
+            {selectedGame !== 'blackjack' && <div className="control-tabs">
               <button disabled={autoRunning} className={betMode === 'manual' ? 'active' : ''} onClick={() => setBetMode('manual')}>Manual</button>
-              <button disabled={autoRunning || selectedGame === 'blackjack'} title={selectedGame === 'blackjack' ? 'Autoplay strategy is not defined in the Blackjack specification' : undefined} className={betMode === 'auto' ? 'active' : ''} onClick={() => setBetMode('auto')}>Auto</button>
-            </div>
+              <button disabled={autoRunning} className={betMode === 'auto' ? 'active' : ''} onClick={() => setBetMode('auto')}>Auto</button>
+            </div>}
             <label className="label">Bet amount</label>
             <input
               type="number"
@@ -1106,14 +1128,14 @@ export default function App() {
               onChange={(event) => setAmountInput(Number(event.target.value))}
             />
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
-              {[0.5, 2, 5].map((value) => (
+              {(selectedGame === 'blackjack' ? [{ label: '½', value: Math.max(0.1, amountInput * 0.5) }, { label: '2×', value: amountInput * 2 }, { label: 'Max', value: Math.min(session?.balance ?? 10000, platformConfig?.games.blackjack.maxBet ?? 10000) }] : [0.5, 2, 5].map(value => ({ label: `${value}×`, value: amountInput * value }))).map((shortcut) => (
                 <button
-                  key={value}
+                  key={shortcut.label}
                   className="button secondary"
                   disabled={autoRunning || Boolean(selectedGame === 'blackjack' && blackjackRound && blackjackRound.phase !== 'settled')}
-                  onClick={() => setAmountInput(clamp(amountInput * value, 0.1, 10000))}
+                  onClick={() => setAmountInput(clamp(shortcut.value, 0.1, 10000))}
                 >
-                  {value}×
+                  {shortcut.label}
                 </button>
               ))}
             </div>
@@ -1376,17 +1398,16 @@ export default function App() {
           {selectedGame === 'blackjack' && <div className="card game-specific-controls blackjack-controls">
             <div className="info-ribbon"><span>Infinite shoe</span><b>Dealer stands on all 17s</b><span>Blackjack 3:2</span><span>RTP {(BLACKJACK_MIN_RTP * 100).toFixed(2)}%</span></div>
             {!blackjackRound || blackjackRound.phase === 'settled' ? <>
-              {blackjackRound?.phase === 'settled' && <div className={`blackjack-settlement ${blackjackRound.net > 0 ? 'positive' : blackjackRound.net < 0 ? 'negative' : ''}`}><span>{blackjackRound.outcome}</span><strong>{blackjackRound.net >= 0 ? '+' : ''}{formatCash(blackjackRound.net)}</strong><small>Risked {formatCash(blackjackRound.totalRisked)} · Returned {formatCash(blackjackRound.payout)}</small></div>}
               <button className="button success primary-game-action" disabled={blackjackBusy} onClick={startBlackjack}>{blackjackBusy ? 'Dealing…' : blackjackRound ? 'Bet Again' : 'Deal'}</button>
             </> : null}
             {blackjackRound?.phase === 'insurance' && <div className="insurance-offer"><div><strong>Insurance?</strong><span>Dealer shows an Ace. Side wager {formatCash(blackjackRound.baseBet / 2)} · pays 2:1.</span></div><div className="blackjack-action-grid two-actions"><button className="button secondary" disabled={blackjackBusy} onClick={() => decideBlackjackInsurance(false)}>No Insurance</button><button className="button success" disabled={blackjackBusy || (session?.balance ?? 0) < blackjackRound.baseBet / 2} title={(session?.balance ?? 0) < blackjackRound.baseBet / 2 ? 'Insufficient balance for insurance' : undefined} onClick={() => decideBlackjackInsurance(true)}>Take Insurance</button></div></div>}
             {blackjackRound?.phase === 'player' && <>
               <div className="active-hand-summary"><span>Playing hand {blackjackRound.activeHandIndex + 1} of {blackjackRound.hands.length}</span><strong>{blackjackRound.hands[blackjackRound.activeHandIndex]?.total}{blackjackRound.hands[blackjackRound.activeHandIndex]?.soft ? ' soft' : ''}</strong></div>
               <div className="blackjack-action-grid">
-                <button className="button blackjack-hit" disabled={blackjackBusy || !blackjackRound.actions.hit} onClick={() => actBlackjack('hit')}>Hit</button>
-                <button className="button blackjack-stand" disabled={blackjackBusy || !blackjackRound.actions.stand} onClick={() => actBlackjack('stand')}>Stand</button>
-                <button className="button secondary" disabled={blackjackBusy || !blackjackRound.actions.double} title={!blackjackRound.actions.double ? 'Requires an eligible two-card hand and enough balance' : undefined} onClick={() => actBlackjack('double')}>Double</button>
-                <button className="button secondary" disabled={blackjackBusy || !blackjackRound.actions.split} title={!blackjackRound.actions.split ? 'Requires equal card values and enough balance; 10/J/Q/K may split together and re-splitting is disabled' : undefined} onClick={() => actBlackjack('split')}>Split</button>
+                <button className="button blackjack-hit" aria-label="Hit" title="Hit" disabled={blackjackBusy || !blackjackRound.actions.hit} onClick={() => actBlackjack('hit')}><BlackjackActionIcon action="hit"/></button>
+                <button className="button blackjack-stand" aria-label="Stand" title="Stand" disabled={blackjackBusy || !blackjackRound.actions.stand} onClick={() => actBlackjack('stand')}><BlackjackActionIcon action="stand"/></button>
+                <button className="button secondary" aria-label="Double" title={!blackjackRound.actions.double ? 'Double requires an eligible two-card hand and enough balance' : 'Double'} disabled={blackjackBusy || !blackjackRound.actions.double} onClick={() => actBlackjack('double')}><BlackjackActionIcon action="double"/></button>
+                <button className="button secondary" aria-label="Split" title={!blackjackRound.actions.split ? 'Split requires equal card values and enough balance; 10/J/Q/K may split together' : 'Split'} disabled={blackjackBusy || !blackjackRound.actions.split} onClick={() => actBlackjack('split')}><BlackjackActionIcon action="split"/></button>
               </div>
             </>}
             {blackjackRound && blackjackRound.phase !== 'settled' && <div className="round-ledger"><span>Base bet <b>{formatCash(blackjackRound.baseBet)}</b></span><span>Total risked <b>{formatCash(blackjackRound.totalRisked)}</b></span><span>Round <b>#{blackjackRound.nonce}</b></span></div>}
