@@ -169,7 +169,7 @@ function GameVisual({ game, houseEdge, running, result, blackjackRound, blackjac
     const stagedDealerTotal = blackjackDealerVisibleCount === null ? blackjackRound?.dealerTotal : blackjackDealerVisibleCount === 0 ? '—' : blackjackHandValue(stagedDealerCards).total;
     const tableStatus = running ? 'DEALING…' : !blackjackRound ? 'PLACE A BET TO START' : blackjackRound.phase === 'insurance' ? 'INSURANCE DECISION' : blackjackRound.phase === 'player' ? `HAND ${blackjackRound.activeHandIndex + 1} · YOUR MOVE` : `${blackjackRound.outcome?.toUpperCase()} · ${blackjackRound.net >= 0 ? '+' : ''}${formatCash(blackjackRound.net)}`;
     return <div className={`visual-stage table-visual blackjack-${blackjackRound?.phase ?? 'ready'} ${running ? 'is-running' : ''}`} aria-live="polite">
-      <div className="shoe-stack"><OriginalsMark className="shoe-brand-logo"/><small>INFINITE SHOE</small></div>
+      <div className="shoe-stack"><span className="shoe-logo-ring"><OriginalsMark className="shoe-brand-logo"/></span><small>INFINITE SHOE</small></div>
       <OriginalsMark className="table-brand-mark"/>
       <div className="dealer-hand"><small>DEALER <em key={`dealer-total-${blackjackDealerVisibleCount}-${stagedDealerTotal}`} className={blackjackDealerVisibleCount !== null ? 'dealer-total-counting' : ''}>{stagedDealerTotal ?? '—'}</em></small><div>{blackjackRound?.dealerCards.map(dealerCard)}</div></div>
       <div className="felt-mark"><b>BLACKJACK PAYS 3 TO 2</b><span>INSURANCE PAYS 2 TO 1</span></div>

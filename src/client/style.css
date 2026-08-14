@@ -138,7 +138,8 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .playing-card .card-value{display:block}
 .playing-card .card-back-mark{position:absolute;z-index:2;inset:50% auto auto 50%;display:grid;place-items:center;width:30px;height:30px;border:1px solid #fff8;border-radius:50%;color:#fff;font-weight:950;opacity:0;transform:translate(-50%,-50%)}
 .playing-card .card-back-logo{width:18px;height:18px;filter:drop-shadow(0 1px 2px #0007)}
-.shoe-stack .shoe-brand-logo{width:34px;height:34px;color:#f1f7fb;filter:drop-shadow(0 2px 3px #001b30)}
+.shoe-stack{width:71px;height:94px;border:4px solid #eef2f4;background:repeating-linear-gradient(45deg,#16598a 0 6px,#0d3d64 6px 12px);box-shadow:8px 6px 0 #183d5b,0 9px 16px #0007}
+.shoe-stack .shoe-logo-ring{display:grid;place-items:center;width:30px;height:30px;border:1px solid #fff8;border-radius:50%;color:#fff}.shoe-stack .shoe-brand-logo{width:18px;height:18px;color:inherit;filter:drop-shadow(0 1px 2px #0007)}.shoe-stack small{top:calc(100% + 8px)}
 .playing-card.hidden-card .card-back-mark{opacity:1}
 .playing-card.dealer-reveal{transform-origin:center;animation:dealerHoleReveal .7s cubic-bezier(.45,0,.55,1) both}
 .playing-card.dealer-reveal .card-value{animation:dealerFaceReveal .7s step-end both}
@@ -154,8 +155,9 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 @media(prefers-reduced-motion:reduce){.playing-card .card-value,.playing-card .card-back-mark{animation:none!important}}
 
 .table-brand-mark{position:absolute;z-index:1;left:7%;top:48%;width:74px;height:74px;color:#d9eee7;opacity:.075;pointer-events:none;filter:drop-shadow(0 5px 8px #001a14)}
-@media(max-width:700px){.table-brand-mark{left:3%;top:49%;width:44px;height:44px;opacity:.065}.playing-card .card-back-logo{width:14px;height:14px}}
+@media(max-width:700px){.table-brand-mark{left:3%;top:49%;width:44px;height:44px;opacity:.065}.playing-card .card-back-logo{width:14px;height:14px}.shoe-stack{width:49px;height:66px;transform:none}.shoe-stack .shoe-logo-ring{width:22px;height:22px}.shoe-stack .shoe-brand-logo{width:14px;height:14px}}
 .game-mode .main-grid.mobile .table-brand-mark{left:3%;top:49%;width:46px;height:46px;opacity:.065}
+@media(max-width:380px){.shoe-stack{right:-2%;width:44px;height:60px;transform:none}}
 
 /* Compact Blackjack controls and settlement feedback. */
 .blackjack-result-toast{position:absolute;z-index:8;left:50%;top:50%;display:flex;align-items:center;gap:8px;padding:7px 11px;border:1px solid #ffffff24;border-radius:7px;background:#101a20e8;box-shadow:0 8px 24px #0008;transform:translate(-50%,-50%);animation:blackjackToastIn .28s cubic-bezier(.18,1.35,.32,1);backdrop-filter:blur(6px)}
