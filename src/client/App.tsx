@@ -19,7 +19,8 @@ import {
   kenoOutcome,
   minesPayoutMultiplier as computeMinesPayoutMultiplier,
   BLACKJACK_HOUSE_EDGE,
-  BLACKJACK_MIN_RTP
+  BLACKJACK_MIN_RTP,
+  blackjackHandValue
 } from '../common/game.js';
 import { rngFloat } from '../common/rng.js';
 
@@ -61,7 +62,7 @@ const gameThemes: Record<GameType, { kicker: string; tone: string; players: stri
   chicken: { kicker: 'Cross or cash out', tone: 'gold', players: '8.6K playing' }
 };
 
-function GameVisual({ game, houseEdge, running, result, blackjackRound, crashValue, crashPhase, minesRound, minesGridSize, kenoNumbers, kenoRisk, wheelSegments, wheelLayout, wheelRotation, limboTarget, plinkoRows, plinkoRisk, diceChance, diceSide, kenoPicks, kenoAnimating, onMineClick, onKenoClick }: { game: GameType; houseEdge: number; running: boolean; result: BetResult | null; blackjackRound: BlackjackRound | null; crashValue: number; crashPhase: string; minesRound: any; minesGridSize: number; kenoNumbers: number[]; kenoRisk: 'classic' | 'low' | 'medium' | 'high'; wheelSegments: number; wheelLayout: number[]; wheelRotation: number; limboTarget: number; plinkoRows: number; plinkoRisk: 'low' | 'medium' | 'high' | 'rain'; diceChance: number; diceSide: 'over' | 'under'; kenoPicks: number[]; kenoAnimating: boolean; onMineClick: (index: number) => void; onKenoClick: (value: number) => void }) {
+function GameVisual({ game, houseEdge, running, result, blackjackRound, blackjackDealerVisibleCount, crashValue, crashPhase, minesRound, minesGridSize, kenoNumbers, kenoRisk, wheelSegments, wheelLayout, wheelRotation, limboTarget, plinkoRows, plinkoRisk, diceChance, diceSide, kenoPicks, kenoAnimating, onMineClick, onKenoClick }: { game: GameType; houseEdge: number; running: boolean; result: BetResult | null; blackjackRound: BlackjackRound | null; blackjackDealerVisibleCount: number | null; crashValue: number; crashPhase: string; minesRound: any; minesGridSize: number; kenoNumbers: number[]; kenoRisk: 'classic' | 'low' | 'medium' | 'high'; wheelSegments: number; wheelLayout: number[]; wheelRotation: number; limboTarget: number; plinkoRows: number; plinkoRisk: 'low' | 'medium' | 'high' | 'rain'; diceChance: number; diceSide: 'over' | 'under'; kenoPicks: number[]; kenoAnimating: boolean; onMineClick: (index: number) => void; onKenoClick: (value: number) => void }) {
   const status = running ? 'BET IN PLAY' : result ? `${result.won ? 'WIN' : 'LOSS'} · ${result.outcome}` : 'READY';
   if (game === 'plinko') {
     const bucket = Number(result?.details?.bucketIndex ?? Math.floor(plinkoRows / 2));
@@ -150,10 +151,12 @@ function GameVisual({ game, houseEdge, running, result, blackjackRound, crashVal
       const dealStep = initialDeal ? index * 2 : splitReplacement ? handIndex + 1 : 0;
       return card(item, index, dealStep, motion);
     };
+    const stagedDealerCards = blackjackDealerVisibleCount === null ? [] : blackjackRound?.dealerCards.slice(0, blackjackDealerVisibleCount).filter((item): item is BlackjackCardView & { rank: number } => typeof item.rank === 'number') ?? [];
+    const stagedDealerTotal = blackjackDealerVisibleCount === null ? blackjackRound?.dealerTotal : blackjackDealerVisibleCount === 0 ? '—' : blackjackHandValue(stagedDealerCards).total;
     const tableStatus = running ? 'DEALING…' : !blackjackRound ? 'PLACE A BET TO START' : blackjackRound.phase === 'insurance' ? 'INSURANCE DECISION' : blackjackRound.phase === 'player' ? `HAND ${blackjackRound.activeHandIndex + 1} · YOUR MOVE` : `${blackjackRound.outcome?.toUpperCase()} · ${blackjackRound.net >= 0 ? '+' : ''}${formatCash(blackjackRound.net)}`;
     return <div className={`visual-stage table-visual blackjack-${blackjackRound?.phase ?? 'ready'} ${running ? 'is-running' : ''}`} aria-live="polite">
       <div className="shoe-stack">▤<small>INFINITE SHOE</small></div>
-      <div className="dealer-hand"><small>DEALER <em>{blackjackRound?.dealerTotal ?? '—'}</em></small><div>{blackjackRound?.dealerCards.map(dealerCard)}</div></div>
+      <div className="dealer-hand"><small>DEALER <em key={`dealer-total-${blackjackDealerVisibleCount}-${stagedDealerTotal}`} className={blackjackDealerVisibleCount !== null ? 'dealer-total-counting' : ''}>{stagedDealerTotal ?? '—'}</em></small><div>{blackjackRound?.dealerCards.map(dealerCard)}</div></div>
       <div className="felt-mark"><b>BLACKJACK PAYS 3 TO 2</b><span>INSURANCE PAYS 2 TO 1</span></div>
       <div className={`blackjack-hands ${blackjackRound?.hands.length === 2 ? 'is-split' : ''}`}>
         {(blackjackRound?.hands ?? []).map((hand, handIndex) => <div className={`player-hand ${blackjackRound?.phase === 'player' && blackjackRound.activeHandIndex === handIndex ? 'active-hand' : ''}`} key={hand.id}>
@@ -244,6 +247,8 @@ export default function App() {
   const [minesRound, setMinesRound] = useState<any>(null);
   const [blackjackRound, setBlackjackRound] = useState<BlackjackRound | null>(null);
   const [blackjackBusy, setBlackjackBusy] = useState(false);
+  const [blackjackDealerVisibleCount, setBlackjackDealerVisibleCount] = useState<number | null>(null);
+  const blackjackAnimationRunRef = useRef(0);
   const [minesSelected, setMinesSelected] = useState<number[]>([]);
   const [visualRunning, setVisualRunning] = useState(false);
   const [visualResult, setVisualResult] = useState<BetResult | null>(null);
@@ -410,15 +415,32 @@ export default function App() {
   };
 
   const applyBlackjackResponse = async (payload: { round: BlackjackRound; balance: number; nonce: number }, transition: BlackjackAction | 'insurance' | 'start') => {
+    const animationRun = ++blackjackAnimationRunRef.current;
+    const advancedInitialDeal = animationMode === 'advanced' && transition === 'start' && payload.round.version === 1 && payload.round.phase !== 'settled';
+    const advancedDealerSequence = animationMode === 'advanced' && payload.round.phase === 'settled';
+    if (advancedInitialDeal) setBlackjackDealerVisibleCount(0);
+    else if (advancedDealerSequence) setBlackjackDealerVisibleCount(1);
+    else if (transition === 'start') setBlackjackDealerVisibleCount(null);
     setBlackjackRound(payload.round);
     setSession(current => current ? { ...current, balance: payload.balance, nonce: payload.nonce } : current);
     if (animationMode === 'advanced') {
-      const initialDeal = transition === 'start' && payload.round.version === 1 && payload.round.phase !== 'settled';
       const extraDealerCards = Math.max(0, payload.round.dealerCards.length - 2);
       const dealerSequenceDuration = extraDealerCards === 0 ? 775 : 638 + (extraDealerCards + 1) * 350;
       const playerSequenceDuration = transition === 'split' ? 1338 : transition === 'insurance' ? 0 : 638;
-      const animationDuration = initialDeal ? 1688 : payload.round.phase === 'settled' ? Math.max(playerSequenceDuration, dealerSequenceDuration) : playerSequenceDuration;
-      await new Promise(resolve => window.setTimeout(resolve, animationDuration));
+      const animationDuration = advancedInitialDeal ? 1688 : payload.round.phase === 'settled' ? Math.max(playerSequenceDuration, dealerSequenceDuration) : playerSequenceDuration;
+      let elapsed = 0;
+      const revealAt = async (time: number, visibleCount: number) => {
+        await new Promise(resolve => window.setTimeout(resolve, Math.max(0, time - elapsed)));
+        elapsed = time;
+        if (blackjackAnimationRunRef.current === animationRun) setBlackjackDealerVisibleCount(visibleCount);
+      };
+      if (advancedInitialDeal) await revealAt(913, 1);
+      if (advancedDealerSequence) {
+        await revealAt(350, Math.min(2, payload.round.dealerCards.length));
+        for (let index = 2; index < payload.round.dealerCards.length; index += 1) await revealAt(index * 350 + 563, index + 1);
+      }
+      await new Promise(resolve => window.setTimeout(resolve, Math.max(0, animationDuration - elapsed)));
+      if (advancedDealerSequence && blackjackAnimationRunRef.current === animationRun) setBlackjackDealerVisibleCount(payload.round.dealerCards.length);
     }
     if (payload.round.phase === 'settled') {
       playTone(payload.round.net > 0 ? 'win' : 'lose', 'blackjack');
@@ -1066,7 +1088,7 @@ export default function App() {
             </div>
           ) : null}
 
-          <GameVisual game={selectedGame} houseEdge={platformConfig?.games[selectedGame].houseEdge ?? .01} running={visualRunning || kenoAnimating} result={selectedGame === 'keno' ? kenoResult : visualResult} blackjackRound={blackjackRound} crashValue={crashValue} crashPhase={crashPhase} minesRound={minesRound} minesGridSize={minesGridSize} kenoNumbers={kenoDrawReveal} kenoRisk={kenoRisk} wheelSegments={wheelSegments} wheelLayout={wheelLayout} wheelRotation={wheelRotation} limboTarget={limboTarget} plinkoRows={plinkoRows} plinkoRisk={plinkoRisk} diceChance={diceChance} diceSide={diceSide} kenoPicks={kenoPicks} kenoAnimating={kenoAnimating} onMineClick={revealMine} onKenoClick={toggleKenoNumber} />
+          <GameVisual game={selectedGame} houseEdge={platformConfig?.games[selectedGame].houseEdge ?? .01} running={visualRunning || kenoAnimating} result={selectedGame === 'keno' ? kenoResult : visualResult} blackjackRound={blackjackRound} blackjackDealerVisibleCount={blackjackDealerVisibleCount} crashValue={crashValue} crashPhase={crashPhase} minesRound={minesRound} minesGridSize={minesGridSize} kenoNumbers={kenoDrawReveal} kenoRisk={kenoRisk} wheelSegments={wheelSegments} wheelLayout={wheelLayout} wheelRotation={wheelRotation} limboTarget={limboTarget} plinkoRows={plinkoRows} plinkoRisk={plinkoRisk} diceChance={diceChance} diceSide={diceSide} kenoPicks={kenoPicks} kenoAnimating={kenoAnimating} onMineClick={revealMine} onKenoClick={toggleKenoNumber} />
 
           {selectedGame !== 'keno' && <div className="card common-bet-card" style={{ marginTop: '1rem' }}>
             <div className="control-tabs">
