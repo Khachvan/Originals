@@ -129,18 +129,21 @@ function GameVisual({ game, houseEdge, running, result, blackjackRound, crashVal
   if (game === 'blackjack') {
     const rankLabel = (rank?: number) => rank === 1 ? 'A' : rank === 11 ? 'J' : rank === 12 ? 'Q' : rank === 13 ? 'K' : String(rank ?? '');
     const suitLabel = (suit?: BlackjackCardView['suit']) => ({ clubs: '♣', diamonds: '♦', hearts: '♥', spades: '♠' }[String(suit)] ?? '');
-    const card = (item: BlackjackCardView, index: number) => item.hidden
-      ? <b key={`hidden-${index}`} className="playing-card hidden-card" aria-label="Hidden dealer card" style={{ '--deal': index } as React.CSSProperties}><span>O</span></b>
-      : <b key={`${item.index}-${index}`} className={`playing-card ${item.suit === 'diamonds' || item.suit === 'hearts' ? 'red-suit' : ''}`} aria-label={`${rankLabel(item.rank)} of ${item.suit}`} style={{ '--deal': index } as React.CSSProperties}>{rankLabel(item.rank)}<i>{suitLabel(item.suit)}</i></b>;
+    const card = (item: BlackjackCardView, index: number, dealStep = 0) => item.hidden
+      ? <b key={`hidden-${index}`} className="playing-card hidden-card" aria-label="Hidden dealer card" style={{ '--deal-step': dealStep, '--card-position': index } as React.CSSProperties}><span>O</span></b>
+      : <b key={`${item.index}-${index}`} className={`playing-card ${item.suit === 'diamonds' || item.suit === 'hearts' ? 'red-suit' : ''}`} aria-label={`${rankLabel(item.rank)} of ${item.suit}`} style={{ '--deal-step': dealStep, '--card-position': index } as React.CSSProperties}>{rankLabel(item.rank)}<i>{suitLabel(item.suit)}</i></b>;
+    const initialDeal = blackjackRound?.version === 1 && blackjackRound.phase !== 'settled';
+    const dealerCard = (item: BlackjackCardView, index: number) => card(item, index, initialDeal ? index * 2 + 1 : blackjackRound?.phase === 'settled' && index >= 1 ? index - 1 : 0);
+    const playerCard = (item: BlackjackCardView, index: number) => card(item, index, initialDeal ? index * 2 : blackjackRound?.hands.length === 2 && index === 1 ? 1 : 0);
     const tableStatus = running ? 'DEALING…' : !blackjackRound ? 'PLACE A BET TO START' : blackjackRound.phase === 'insurance' ? 'INSURANCE DECISION' : blackjackRound.phase === 'player' ? `HAND ${blackjackRound.activeHandIndex + 1} · YOUR MOVE` : `${blackjackRound.outcome?.toUpperCase()} · ${blackjackRound.net >= 0 ? '+' : ''}${formatCash(blackjackRound.net)}`;
     return <div className={`visual-stage table-visual blackjack-${blackjackRound?.phase ?? 'ready'} ${running ? 'is-running' : ''}`} aria-live="polite">
       <div className="shoe-stack">▤<small>INFINITE SHOE</small></div>
-      <div className="dealer-hand"><small>DEALER <em>{blackjackRound?.dealerTotal ?? '—'}</em></small><div>{blackjackRound?.dealerCards.map(card)}</div></div>
+      <div className="dealer-hand"><small>DEALER <em>{blackjackRound?.dealerTotal ?? '—'}</em></small><div>{blackjackRound?.dealerCards.map(dealerCard)}</div></div>
       <div className="felt-mark"><b>BLACKJACK PAYS 3 TO 2</b><span>INSURANCE PAYS 2 TO 1</span></div>
       <div className={`blackjack-hands ${blackjackRound?.hands.length === 2 ? 'is-split' : ''}`}>
         {(blackjackRound?.hands ?? []).map((hand, handIndex) => <div className={`player-hand ${blackjackRound?.phase === 'player' && blackjackRound.activeHandIndex === handIndex ? 'active-hand' : ''}`} key={hand.id}>
           <small>HAND {handIndex + 1} <em>{hand.total}</em>{hand.result && <strong className={`hand-result ${hand.result}`}>{hand.result}</strong>}</small>
-          <div>{hand.cards.map(card)}</div>
+          <div>{hand.cards.map(playerCard)}</div>
           <span className="hand-wager">{formatCash(hand.wager)}{hand.doubled ? ' · DOUBLED' : hand.splitAces ? ' · SPLIT ACES' : ''}{hand.payout > 0 ? ` · Return ${formatCash(hand.payout)}` : ''}</span>
         </div>)}
         {!blackjackRound && <div className="player-hand empty-hand"><small>PLAYER <em>—</em></small><div><span>Deal to begin</span></div></div>}
@@ -394,7 +397,10 @@ export default function App() {
   const applyBlackjackResponse = async (payload: { round: BlackjackRound; balance: number; nonce: number }) => {
     setBlackjackRound(payload.round);
     setSession(current => current ? { ...current, balance: payload.balance, nonce: payload.nonce } : current);
-    if (animationMode === 'advanced') await new Promise(resolve => window.setTimeout(resolve, 460));
+    if (animationMode === 'advanced') {
+      const initialDealDuration = payload.round.version === 1 && payload.round.phase !== 'settled' ? 1350 : 520 + Math.max(0, payload.round.dealerCards.length - 2) * 280;
+      await new Promise(resolve => window.setTimeout(resolve, initialDealDuration));
+    }
     if (payload.round.phase === 'settled') {
       playTone(payload.round.net > 0 ? 'win' : 'lose', 'blackjack');
       await refreshSession();
@@ -1339,7 +1345,7 @@ export default function App() {
                 <button className="button blackjack-hit" disabled={blackjackBusy || !blackjackRound.actions.hit} onClick={() => actBlackjack('hit')}>Hit</button>
                 <button className="button blackjack-stand" disabled={blackjackBusy || !blackjackRound.actions.stand} onClick={() => actBlackjack('stand')}>Stand</button>
                 <button className="button secondary" disabled={blackjackBusy || !blackjackRound.actions.double} title={!blackjackRound.actions.double ? 'Requires an eligible two-card hand and enough balance' : undefined} onClick={() => actBlackjack('double')}>Double</button>
-                <button className="button secondary" disabled={blackjackBusy || !blackjackRound.actions.split} title={!blackjackRound.actions.split ? 'Requires identical ranks and enough balance; re-splitting is disabled' : undefined} onClick={() => actBlackjack('split')}>Split</button>
+                <button className="button secondary" disabled={blackjackBusy || !blackjackRound.actions.split} title={!blackjackRound.actions.split ? 'Requires equal card values and enough balance; 10/J/Q/K may split together and re-splitting is disabled' : undefined} onClick={() => actBlackjack('split')}>Split</button>
               </div>
             </>}
             {blackjackRound && blackjackRound.phase !== 'settled' && <div className="round-ledger"><span>Base bet <b>{formatCash(blackjackRound.baseBet)}</b></span><span>Total risked <b>{formatCash(blackjackRound.totalRisked)}</b></span><span>Round <b>#{blackjackRound.nonce}</b></span></div>}

@@ -22,6 +22,7 @@ import {
   BLACKJACK_MIN_RTP,
   blackjackCardFromFloat,
   blackjackHandValue,
+  blackjackSplitValue,
   isBlackjackNatural
 } from '../common/game.js';
 import type { BetResult, BlackjackAction, BlackjackCard, BlackjackHand, BlackjackRound, CrashRound, MineRound, GameType, PlatformConfig } from '../common/types.js';
@@ -132,7 +133,7 @@ function blackjackActions(round: InternalBlackjackRound, balance: number): Recor
   actions.hit = hand.total < 21 && !hand.splitAces;
   actions.stand = true;
   actions.double = hand.cards.length === 2 && !hand.splitAces && balance >= hand.wager;
-  actions.split = round.hands.length === 1 && hand.cards.length === 2 && hand.cards[0].rank === hand.cards[1].rank && balance >= hand.wager;
+  actions.split = round.hands.length === 1 && hand.cards.length === 2 && blackjackSplitValue(hand.cards[0].rank) === blackjackSplitValue(hand.cards[1].rank) && balance >= hand.wager;
   return actions;
 }
 

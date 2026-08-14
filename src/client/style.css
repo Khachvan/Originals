@@ -126,3 +126,6 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 @media(max-width:380px){.table-visual{min-height:345px!important}.dealer-hand .playing-card,.player-hand .playing-card{width:42px;height:59px}.shoe-stack{display:none}.blackjack-action-grid{gap:6px}.round-ledger{font-size:8px}}
 
 @media(prefers-reduced-motion:reduce){.playing-card{animation:none!important}.player-hand{transition:none!important}}
+
+/* Blackjack cards follow the committed draw order: player, dealer, player, dealer. */
+.dealer-hand .playing-card,.player-hand .playing-card{transform:rotate(calc((var(--card-position,0) - 1) * 2deg));animation:cardDeal .45s calc(var(--deal-step,0) * .28s) cubic-bezier(.18,.78,.2,1) backwards}

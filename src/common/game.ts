@@ -77,6 +77,10 @@ export function isBlackjackNatural(cards: Array<{ rank: number }>) {
   return cards.length === 2 && blackjackHandValue(cards).total === 21;
 }
 
+export function blackjackSplitValue(rank: number) {
+  return Math.min(10, rank);
+}
+
 const beats: Record<RpsParams['choice'], RpsParams['choice']> = { rock: 'scissors', paper: 'rock', scissors: 'paper' };
 
 export function rpsOutcome(f: number, params: RpsParams, houseEdge = HOUSE_EDGE): BetResult {
