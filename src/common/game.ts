@@ -2,6 +2,8 @@ import { rngFloat, rngFloatStream } from './rng.js';
 import type { GameType } from './types.js';
 
 export const HOUSE_EDGE = 0.01;
+export const BLACKJACK_HOUSE_EDGE = 0.0057;
+export const BLACKJACK_MIN_RTP = 0.9943;
 export const MAX_PAYOUT_MULTIPLIER = 1_000_000;
 export const DEFAULT_BALANCE = 10000;
 export const CRASH_GROWTH_K = 0.35;
@@ -50,6 +52,31 @@ export interface RpsParams { choice: 'rock' | 'paper' | 'scissors'; }
 export interface TowerParams { difficulty: 'easy' | 'medium' | 'hard'; level?: number; }
 export interface ChickenParams { difficulty: 'easy' | 'medium' | 'hard'; step?: number; }
 
+export const BLACKJACK_SUITS = ['clubs', 'diamonds', 'hearts', 'spades'] as const;
+
+export function blackjackCardFromFloat(f: number) {
+  const index = Math.min(51, Math.floor(f * 52));
+  return {
+    index,
+    rank: (index % 13) + 1,
+    suit: BLACKJACK_SUITS[Math.floor(index / 13)]
+  };
+}
+
+export function blackjackHandValue(cards: Array<{ rank: number }>) {
+  let total = cards.reduce((sum, card) => sum + (card.rank === 1 ? 11 : Math.min(10, card.rank)), 0);
+  let acesAsEleven = cards.filter(card => card.rank === 1).length;
+  while (total > 21 && acesAsEleven > 0) {
+    total -= 10;
+    acesAsEleven -= 1;
+  }
+  return { total, soft: acesAsEleven > 0 };
+}
+
+export function isBlackjackNatural(cards: Array<{ rank: number }>) {
+  return cards.length === 2 && blackjackHandValue(cards).total === 21;
+}
+
 const beats: Record<RpsParams['choice'], RpsParams['choice']> = { rock: 'scissors', paper: 'rock', scissors: 'paper' };
 
 export function rpsOutcome(f: number, params: RpsParams, houseEdge = HOUSE_EDGE): BetResult {
@@ -59,20 +86,6 @@ export function rpsOutcome(f: number, params: RpsParams, houseEdge = HOUSE_EDGE)
   const won = beats[params.choice] === opponent;
   const multiplier = won ? Number((3 * (1 - houseEdge)).toFixed(2)) : draw ? 1 : 0;
   return { game: 'rps', outcome: `${params.choice} vs ${opponent}`, won: won || draw, payout: multiplier, multiplier, details: { choice: params.choice, opponent, draw } };
-}
-
-export function blackjackOutcome(floats: number[], houseEdge = HOUSE_EDGE): BetResult {
-  const rank = (f: number) => Math.min(13, Math.floor(f * 13) + 1);
-  const value = (r: number) => r === 1 ? 11 : Math.min(10, r);
-  const cards = floats.slice(0, 6).map(rank);
-  const total = (rs: number[]) => { let sum = rs.reduce((s,r)=>s+value(r),0); let aces=rs.filter(r=>r===1).length; while(sum>21&&aces--)sum-=10; return sum; };
-  const player=[cards[0],cards[2]], dealer=[cards[1],cards[3]];
-  while(total(player)<17 && player.length<4) player.push(cards[player.length+2]);
-  while(total(dealer)<17 && dealer.length<4) dealer.push(cards[dealer.length+2]);
-  const p=total(player), d=total(dealer), natural=p===21&&player.length===2;
-  const push=p<=21&&p===d; const won=p<=21&&(d>21||p>d);
-  const multiplier=push?1:won?(natural?Number((2.5*(1-houseEdge)).toFixed(2)):Number((2*(1-houseEdge)).toFixed(2))):0;
-  return { game:'blackjack', outcome: push?`Push ${p}`:won?`${p} beats ${d}`:`${p} loses to ${d}`, won:won||push, payout:multiplier, multiplier, details:{player,dealer,playerTotal:p,dealerTotal:d,push,natural} };
 }
 
 function progressionOutcome(game: 'tower'|'chicken', f: number, difficulty: 'easy'|'medium'|'hard', requested=1, houseEdge=HOUSE_EDGE): BetResult {
@@ -331,7 +344,6 @@ export async function kenoBet(serverSeed: string, clientSeed: string, nonce: num
 }
 
 export async function rpsBet(serverSeed:string,clientSeed:string,nonce:number,params:RpsParams,houseEdge=HOUSE_EDGE){ return rpsOutcome(await rngFloat(serverSeed,clientSeed,nonce),params,houseEdge); }
-export async function blackjackBet(serverSeed:string,clientSeed:string,nonce:number,houseEdge=HOUSE_EDGE){ return blackjackOutcome(await rngFloatStream(serverSeed,clientSeed,nonce,6),houseEdge); }
 export async function towerBet(serverSeed:string,clientSeed:string,nonce:number,params:TowerParams,houseEdge=HOUSE_EDGE){ return towerOutcome(await rngFloat(serverSeed,clientSeed,nonce),params,houseEdge); }
 export async function chickenBet(serverSeed:string,clientSeed:string,nonce:number,params:ChickenParams,houseEdge=HOUSE_EDGE){ return chickenOutcome(await rngFloat(serverSeed,clientSeed,nonce),params,houseEdge); }
 

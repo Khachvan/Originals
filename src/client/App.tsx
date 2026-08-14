@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { type BetResult, type SessionState, type ShellView, type GameType, type PlatformConfig } from '../common/types.js';
+import { type BetResult, type BlackjackAction, type BlackjackCardView, type BlackjackRound, type SessionState, type ShellView, type GameType, type PlatformConfig } from '../common/types.js';
 import {
   diceMultiplier,
   diceTargetFromChance,
@@ -17,7 +17,9 @@ import {
   wheelOutcome,
   kenoDraw,
   kenoOutcome,
-  minesPayoutMultiplier as computeMinesPayoutMultiplier
+  minesPayoutMultiplier as computeMinesPayoutMultiplier,
+  BLACKJACK_HOUSE_EDGE,
+  BLACKJACK_MIN_RTP
 } from '../common/game.js';
 import { rngFloat } from '../common/rng.js';
 
@@ -59,7 +61,7 @@ const gameThemes: Record<GameType, { kicker: string; tone: string; players: stri
   chicken: { kicker: 'Cross or cash out', tone: 'gold', players: '8.6K playing' }
 };
 
-function GameVisual({ game, houseEdge, running, result, crashValue, crashPhase, minesRound, minesGridSize, kenoNumbers, kenoRisk, wheelSegments, wheelLayout, wheelRotation, limboTarget, plinkoRows, plinkoRisk, diceChance, diceSide, kenoPicks, kenoAnimating, onMineClick, onKenoClick }: { game: GameType; houseEdge: number; running: boolean; result: BetResult | null; crashValue: number; crashPhase: string; minesRound: any; minesGridSize: number; kenoNumbers: number[]; kenoRisk: 'classic' | 'low' | 'medium' | 'high'; wheelSegments: number; wheelLayout: number[]; wheelRotation: number; limboTarget: number; plinkoRows: number; plinkoRisk: 'low' | 'medium' | 'high' | 'rain'; diceChance: number; diceSide: 'over' | 'under'; kenoPicks: number[]; kenoAnimating: boolean; onMineClick: (index: number) => void; onKenoClick: (value: number) => void }) {
+function GameVisual({ game, houseEdge, running, result, blackjackRound, crashValue, crashPhase, minesRound, minesGridSize, kenoNumbers, kenoRisk, wheelSegments, wheelLayout, wheelRotation, limboTarget, plinkoRows, plinkoRisk, diceChance, diceSide, kenoPicks, kenoAnimating, onMineClick, onKenoClick }: { game: GameType; houseEdge: number; running: boolean; result: BetResult | null; blackjackRound: BlackjackRound | null; crashValue: number; crashPhase: string; minesRound: any; minesGridSize: number; kenoNumbers: number[]; kenoRisk: 'classic' | 'low' | 'medium' | 'high'; wheelSegments: number; wheelLayout: number[]; wheelRotation: number; limboTarget: number; plinkoRows: number; plinkoRisk: 'low' | 'medium' | 'high' | 'rain'; diceChance: number; diceSide: 'over' | 'under'; kenoPicks: number[]; kenoAnimating: boolean; onMineClick: (index: number) => void; onKenoClick: (value: number) => void }) {
   const status = running ? 'BET IN PLAY' : result ? `${result.won ? 'WIN' : 'LOSS'} · ${result.outcome}` : 'READY';
   if (game === 'plinko') {
     const bucket = Number(result?.details?.bucketIndex ?? Math.floor(plinkoRows / 2));
@@ -124,7 +126,28 @@ function GameVisual({ game, houseEdge, running, result, crashValue, crashPhase, 
   if (game === 'keno') { const hits = kenoNumbers.filter(number => kenoPicks.includes(number)).length; const paytable = kenoPayoutTables[kenoRisk][kenoPicks.length] ?? []; return <div className="visual-stage keno-visual"><div className="keno-paytable"><span className="paytable-label">Hits / payout</span>{paytable.map((odd, count) => <div key={count} className={hits === count && kenoNumbers.length === 10 ? 'reached' : ''}><b>{count} hit</b><small>{odd.toFixed(2)}×</small></div>)}</div><div className="keno-play-grid">{Array.from({ length: 40 }, (_, i) => i + 1).map(value => { const selected = kenoPicks.includes(value); const drawn = kenoNumbers.includes(value); return <button key={value} disabled={kenoAnimating} onClick={() => onKenoClick(value)} className={`${selected ? 'selected' : ''} ${drawn ? 'drawn' : ''} ${selected && drawn ? 'hit' : ''}`}>{value}</button>; })}</div><div className="stage-status">{running ? `DRAWING ${kenoNumbers.length}/10 · ${hits} HITS` : `${kenoPicks.length}/10 SELECTED${kenoNumbers.length ? ` · ${hits} HITS` : ''}`}</div></div>; }
   if (game === 'dice') { const target = diceTargetFromChance(diceChance, diceSide); const marker = result ? Number(result.details?.roll ?? target) : target; return <div className={`visual-stage dice-visual ${running ? 'is-running' : ''}`}><div className="dice-scale-labels"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div><div className={`range-track ${diceSide}`}><span style={{ left: `${marker}%` }}/><b>{marker.toFixed(2)}</b></div><div className="dice-metrics"><div><small>Multiplier</small><strong>{diceMultiplier(diceChance).toFixed(4)}×</strong></div><div><small>Roll {diceSide === 'over' ? 'Over' : 'Under'}</small><strong>{target.toFixed(2)}</strong></div><div><small>Win Chance</small><strong>{diceChance.toFixed(2)}%</strong></div></div><div className="stage-status">{status}</div></div>; }
   if (game === 'limbo') return <div className={`visual-stage limbo-visual ${running ? 'is-running' : ''} ${!running && result ? (result.won ? 'won' : 'lost') : ''}`}><span>{running ? '···' : result ? result.outcome : `${limboTarget.toFixed(2)}×`}</span><div className="orbit one"/><div className="orbit two"/><div className="stage-status">{status}</div></div>;
-  if (game === 'blackjack') { const p=(result?.details?.player as number[]|undefined)??[]; const d=(result?.details?.dealer as number[]|undefined)??[]; const card=(n:number)=>n===1?'A':n===11?'J':n===12?'Q':n===13?'K':String(n); return <div className={`visual-stage table-visual ${running?'is-running':''}`}><div className="shoe-stack">▤<small>INFINITE SHOE</small></div><div className="dealer-hand"><small>DEALER <em>{String(result?.details?.dealerTotal??'—')}</em></small><div>{d.map((n,i)=><b key={i} style={{'--deal':i} as React.CSSProperties}>{card(n)}<i>{i%2?'♠':'♥'}</i></b>)}</div></div><div className="felt-mark"><b>BLACKJACK PAYS 3 TO 2</b><span>INSURANCE PAYS 2 TO 1</span></div><div className="player-hand"><small>PLAYER <em>{String(result?.details?.playerTotal??'—')}</em></small><div>{p.map((n,i)=><b key={i} style={{'--deal':i+2} as React.CSSProperties}>{card(n)}<i>{i%2?'♣':'♦'}</i></b>)}</div></div><div className="bet-ring">BET</div><div className="stage-status">{status}</div></div>; }
+  if (game === 'blackjack') {
+    const rankLabel = (rank?: number) => rank === 1 ? 'A' : rank === 11 ? 'J' : rank === 12 ? 'Q' : rank === 13 ? 'K' : String(rank ?? '');
+    const suitLabel = (suit?: BlackjackCardView['suit']) => ({ clubs: '♣', diamonds: '♦', hearts: '♥', spades: '♠' }[String(suit)] ?? '');
+    const card = (item: BlackjackCardView, index: number) => item.hidden
+      ? <b key={`hidden-${index}`} className="playing-card hidden-card" aria-label="Hidden dealer card" style={{ '--deal': index } as React.CSSProperties}><span>O</span></b>
+      : <b key={`${item.index}-${index}`} className={`playing-card ${item.suit === 'diamonds' || item.suit === 'hearts' ? 'red-suit' : ''}`} aria-label={`${rankLabel(item.rank)} of ${item.suit}`} style={{ '--deal': index } as React.CSSProperties}>{rankLabel(item.rank)}<i>{suitLabel(item.suit)}</i></b>;
+    const tableStatus = running ? 'DEALING…' : !blackjackRound ? 'PLACE A BET TO START' : blackjackRound.phase === 'insurance' ? 'INSURANCE DECISION' : blackjackRound.phase === 'player' ? `HAND ${blackjackRound.activeHandIndex + 1} · YOUR MOVE` : `${blackjackRound.outcome?.toUpperCase()} · ${blackjackRound.net >= 0 ? '+' : ''}${formatCash(blackjackRound.net)}`;
+    return <div className={`visual-stage table-visual blackjack-${blackjackRound?.phase ?? 'ready'} ${running ? 'is-running' : ''}`} aria-live="polite">
+      <div className="shoe-stack">▤<small>INFINITE SHOE</small></div>
+      <div className="dealer-hand"><small>DEALER <em>{blackjackRound?.dealerTotal ?? '—'}</em></small><div>{blackjackRound?.dealerCards.map(card)}</div></div>
+      <div className="felt-mark"><b>BLACKJACK PAYS 3 TO 2</b><span>INSURANCE PAYS 2 TO 1</span></div>
+      <div className={`blackjack-hands ${blackjackRound?.hands.length === 2 ? 'is-split' : ''}`}>
+        {(blackjackRound?.hands ?? []).map((hand, handIndex) => <div className={`player-hand ${blackjackRound?.phase === 'player' && blackjackRound.activeHandIndex === handIndex ? 'active-hand' : ''}`} key={hand.id}>
+          <small>HAND {handIndex + 1} <em>{hand.total}</em>{hand.result && <strong className={`hand-result ${hand.result}`}>{hand.result}</strong>}</small>
+          <div>{hand.cards.map(card)}</div>
+          <span className="hand-wager">{formatCash(hand.wager)}{hand.doubled ? ' · DOUBLED' : hand.splitAces ? ' · SPLIT ACES' : ''}{hand.payout > 0 ? ` · Return ${formatCash(hand.payout)}` : ''}</span>
+        </div>)}
+        {!blackjackRound && <div className="player-hand empty-hand"><small>PLAYER <em>—</em></small><div><span>Deal to begin</span></div></div>}
+      </div>
+      <div className="bet-ring">BET</div><div className="stage-status">{tableStatus}</div>
+    </div>;
+  }
   if (game === 'rps') { const icons:any={rock:'✊',paper:'✋',scissors:'✌️'}; return <div className={`visual-stage duel-visual ${running?'is-running':''}`}><div className="duel-side player"><small>YOUR HAND</small><b>{icons[String(result?.details?.choice??'rock')]}</b><i>LOCKED</i></div><div className="duel-center"><span>VS</span><em>{result?.multiplier?.toFixed(2)??'2.97'}×</em></div><div className="duel-side house"><small>HOUSE HAND</small><b>{running?'❔':icons[String(result?.details?.opponent??'paper')]}</b><i>{running?'REVEALING':'REVEALED'}</i></div><div className="stage-status">{status}</div></div>; }
   if (game === 'tower') { const reached=Number(result?.details?.reached??0), target=Number(result?.details?.target??5); return <div className="visual-stage tower-visual"><div className="tower-pillars left"/><div className="tower-pillars right"/><div className="tower-grid">{Array.from({length:9},(_,i)=>8-i).map(level=><div key={level} className={`${level<reached?'safe':result&&!result.won&&level===reached?'trap':''} ${level===target-1?'target':''}`}><span>{level+1}<small>{(1.25**(level+1)).toFixed(2)}×</small></span>{[0,1,2,3].map(x=><b key={x}>{level<reached?'◆':result&&!result.won&&level===reached&&x===2?'💣':'?'}</b>)}</div>)}</div><strong className="progress-caption">Target level {target}</strong><div className="stage-status">{status}</div></div>; }
   if (game === 'chicken') { const reached=Number(result?.details?.reached??0), target=Number(result?.details?.target??5); return <div className="visual-stage chicken-visual"><div className="road">{Array.from({length:15},(_,i)=><span key={i} className={i<reached?'safe':result&&!result.won&&i===reached?'trap':''}>{i<reached?'✓':result&&!result.won&&i===reached?'💥':i+1}</span>)}<b className="chicken-runner" style={{left:`${Math.min(94,reached/15*100)}%`}}>🐔</b></div><strong className="progress-caption">Cross {target} steps</strong><div className="stage-status">{status}</div></div>; }
@@ -201,6 +224,8 @@ export default function App() {
   const [cashoutError, setCashoutError] = useState<string | null>(null);
   const [crashRound, setCrashRound] = useState<any>(null);
   const [minesRound, setMinesRound] = useState<any>(null);
+  const [blackjackRound, setBlackjackRound] = useState<BlackjackRound | null>(null);
+  const [blackjackBusy, setBlackjackBusy] = useState(false);
   const [minesSelected, setMinesSelected] = useState<number[]>([]);
   const [visualRunning, setVisualRunning] = useState(false);
   const [visualResult, setVisualResult] = useState<BetResult | null>(null);
@@ -246,6 +271,7 @@ export default function App() {
     setKenoDrawReveal([]);
     setKenoAnimating(false);
     setCrashPhase('ready');
+    if (selectedGame === 'blackjack') setBetMode('manual');
   }, [selectedGame]);
 
   const playTone = (kind: 'click' | 'start' | 'tick' | 'win' | 'lose', game: GameType = selectedGame) => {
@@ -279,6 +305,16 @@ export default function App() {
   }, []);
 
   useEffect(() => { apiFetch<PlatformConfig>('/api/config').then(config => { setPlatformConfig(config); setAdminDraft(structuredClone(config)); }).catch(() => undefined); }, []);
+
+  useEffect(() => {
+    if (selectedGame !== 'blackjack') return;
+    apiFetch<{round: BlackjackRound | null; balance: number; nonce: number}>('/api/blackjack/state')
+      .then(payload => {
+        setBlackjackRound(payload.round);
+        setSession(current => current ? { ...current, balance: payload.balance, nonce: payload.nonce } : current);
+      })
+      .catch((err: Error) => setError(err.message));
+  }, [selectedGame]);
 
   const openBackoffice = async () => {
     const payload = await apiFetch<{config: PlatformConfig; audit: typeof adminAudit}>('/api/admin/config');
@@ -352,6 +388,70 @@ export default function App() {
       setVisualRunning(false);
       setError(err.message);
       throw err;
+    }
+  };
+
+  const applyBlackjackResponse = async (payload: { round: BlackjackRound; balance: number; nonce: number }) => {
+    setBlackjackRound(payload.round);
+    setSession(current => current ? { ...current, balance: payload.balance, nonce: payload.nonce } : current);
+    if (animationMode === 'advanced') await new Promise(resolve => window.setTimeout(resolve, 460));
+    if (payload.round.phase === 'settled') {
+      playTone(payload.round.net > 0 ? 'win' : 'lose', 'blackjack');
+      await refreshSession();
+    }
+  };
+
+  const startBlackjack = async () => {
+    setError(null);
+    setBlackjackBusy(true);
+    setVisualRunning(true);
+    playTone('start', 'blackjack');
+    try {
+      const requestId = window.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+      const payload = await apiFetch<{round: BlackjackRound; balance: number; nonce: number}>('/api/blackjack/start', { amount: amountInput, requestId });
+      await applyBlackjackResponse(payload);
+    } catch (err: any) {
+      setError(err.message);
+      try {
+        const recovered = await apiFetch<{round: BlackjackRound | null; balance: number; nonce: number}>('/api/blackjack/state');
+        if (recovered.round) setBlackjackRound(recovered.round);
+      } catch { /* retain the original action error */ }
+    } finally {
+      setVisualRunning(false);
+      setBlackjackBusy(false);
+    }
+  };
+
+  const decideBlackjackInsurance = async (take: boolean) => {
+    setError(null);
+    setBlackjackBusy(true);
+    try {
+      if (!blackjackRound) throw new Error('No Blackjack round found');
+      const requestId = window.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+      const payload = await apiFetch<{round: BlackjackRound; balance: number; nonce: number}>('/api/blackjack/insurance', { take, requestId, roundId: blackjackRound.id, version: blackjackRound.version });
+      await applyBlackjackResponse(payload);
+    } catch (err: any) { setError(err.message); }
+    finally { setBlackjackBusy(false); }
+  };
+
+  const actBlackjack = async (action: BlackjackAction) => {
+    setError(null);
+    setBlackjackBusy(true);
+    setVisualRunning(true);
+    try {
+      if (!blackjackRound) throw new Error('No Blackjack round found');
+      const requestId = window.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+      const payload = await apiFetch<{round: BlackjackRound; balance: number; nonce: number}>('/api/blackjack/action', { action, requestId, roundId: blackjackRound.id, version: blackjackRound.version });
+      await applyBlackjackResponse(payload);
+    } catch (err: any) {
+      setError(err.message);
+      try {
+        const recovered = await apiFetch<{round: BlackjackRound | null; balance: number; nonce: number}>('/api/blackjack/state');
+        if (recovered.round) setBlackjackRound(recovered.round);
+      } catch { /* retain the original action error */ }
+    } finally {
+      setVisualRunning(false);
+      setBlackjackBusy(false);
     }
   };
 
@@ -615,6 +715,10 @@ export default function App() {
       setError('Finish the active Crash round before starting Auto Bet.');
       return;
     }
+    if (selectedGame === 'blackjack') {
+      setError('Blackjack Auto Bet is unavailable until an autoplay decision strategy is defined. Use the complete manual action flow.');
+      return;
+    }
 
     autoRunningRef.current = true;
     autoStopRef.current = false;
@@ -643,7 +747,6 @@ export default function App() {
           result = await placeKenoBet(currentAmount);
           await pause(animationMode === 'instant' ? 120 : 900);
         }
-        else if (game === 'blackjack') result = await placeBet('blackjack', {}, currentAmount);
         else if (game === 'rps') result = await placeBet('rps', { choice: rpsChoice }, currentAmount);
         else if (game === 'tower') result = await placeBet('tower', { difficulty: progressDifficulty, level: progressTarget }, currentAmount);
         else if (game === 'chicken') result = await placeBet('chicken', { difficulty: progressDifficulty, step: progressTarget }, currentAmount);
@@ -785,7 +888,7 @@ export default function App() {
         <div className="backoffice-header"><div><p className="eyebrow">OPERATIONS / GAME CONFIGURATION</p><h1>Originals Backoffice</h1><p>Configure margin, RTP and financial limits. Changes apply only after publishing.</p></div><div><button className="button secondary" onClick={() => setScreen('lobby')}>← Casino</button><button className="button success" onClick={publishConfig}>Publish configuration</button></div></div>
         <section className="admin-summary"><div><small>Published version</small><strong>v{platformConfig?.version}</strong></div><div><small>Last updated</small><strong>{new Date(platformConfig?.updatedAt ?? '').toLocaleString()}</strong></div><div><small>Games enabled</small><strong>{Object.values(adminDraft.games).filter(game => game.enabled).length}/{gameList.length}</strong></div><div><small>Average RTP</small><strong>{(Object.values(adminDraft.games).reduce((sum,game)=>sum+1-game.houseEdge,0)/gameList.length*100).toFixed(2)}%</strong></div></section>
         {adminMessage && <div className="admin-notice">{adminMessage}</div>}
-        <section className="admin-games">{gameList.map(item => { const config = adminDraft.games[item.type]; const update = (field: string, value: number | boolean) => setAdminDraft(current => current ? ({...current,games:{...current.games,[item.type]:{...current.games[item.type],[field]:value}}}) : current); return <article className="admin-game" key={item.type}><header><span>{gameIcons[item.type]}</span><div><h3>{item.label}</h3><small>{item.description}</small></div><label className="admin-switch"><input type="checkbox" checked={config.enabled} onChange={event=>update('enabled',event.target.checked)}/><i/></label></header><div className="margin-control"><label>House margin <b>{(config.houseEdge*100).toFixed(2)}%</b></label><input type="range" min="0.1" max="15" step="0.1" value={config.houseEdge*100} onChange={event=>update('houseEdge',Number(event.target.value)/100)}/><div className="rtp-preview"><span>Calculated RTP</span><strong>{((1-config.houseEdge)*100).toFixed(2)}%</strong></div></div><div className="admin-fields"><label>Minimum bet<input type="number" value={config.minBet} onChange={event=>update('minBet',Number(event.target.value))}/></label><label>Maximum bet<input type="number" value={config.maxBet} onChange={event=>update('maxBet',Number(event.target.value))}/></label><label>Maximum payout<input type="number" value={config.maxPayout} onChange={event=>update('maxPayout',Number(event.target.value))}/></label></div><div className="odds-preview"><span>Odds engine</span><b>{item.type === 'dice' ? `${diceMultiplier(50,config.houseEdge).toFixed(4)}× at 50%` : item.type === 'wheel' ? generateWheelLayout(20,'low',config.houseEdge).slice(-1)[0].toFixed(2)+'× boost' : item.type === 'plinko' ? `${generatePlinkoPayout(16,'medium',config.houseEdge)[0].toFixed(2)}× edge` : item.type === 'keno' ? `${generateKenoTable('classic',config.houseEdge)[5][5].toFixed(2)}× 5 hits` : `${((1-config.houseEdge)*100).toFixed(2)}% theoretical RTP`}</b></div></article>})}</section>
+        <section className="admin-games">{gameList.map(item => { const config = adminDraft.games[item.type]; const blackjack = item.type === 'blackjack'; const update = (field: string, value: number | boolean) => setAdminDraft(current => current ? ({...current,games:{...current.games,[item.type]:{...current.games[item.type],[field]:field === 'houseEdge' && blackjack ? Math.min(BLACKJACK_HOUSE_EDGE, Number(value)) : value}}}) : current); return <article className={`admin-game ${blackjack ? 'blackjack-config' : ''}`} key={item.type}><header><span>{gameIcons[item.type]}</span><div><h3>{item.label}</h3><small>{item.description}</small></div><label className="admin-switch"><input type="checkbox" checked={config.enabled} onChange={event=>update('enabled',event.target.checked)}/><i/></label></header><div className="margin-control"><label>House margin <b>{(config.houseEdge*100).toFixed(2)}%</b></label><input type="range" min="0.1" max={blackjack ? String(BLACKJACK_HOUSE_EDGE * 100) : '15'} step={blackjack ? '0.01' : '0.1'} value={config.houseEdge*100} onChange={event=>update('houseEdge',Number(event.target.value)/100)}/><div className="rtp-preview"><span>Calculated RTP</span><strong>{((1-config.houseEdge)*100).toFixed(2)}%</strong></div>{blackjack && <small className="rtp-floor">Protected minimum RTP {(BLACKJACK_MIN_RTP * 100).toFixed(2)}% · maximum margin {(BLACKJACK_HOUSE_EDGE * 100).toFixed(2)}%</small>}</div><div className="admin-fields"><label>Minimum bet<input type="number" value={config.minBet} onChange={event=>update('minBet',Number(event.target.value))}/></label><label>Maximum bet<input type="number" value={config.maxBet} onChange={event=>update('maxBet',Number(event.target.value))}/></label><label>Maximum payout<input type="number" value={config.maxPayout} onChange={event=>update('maxPayout',Number(event.target.value))}/></label></div><div className="odds-preview"><span>Odds engine</span><b>{item.type === 'dice' ? `${diceMultiplier(50,config.houseEdge).toFixed(4)}× at 50%` : item.type === 'wheel' ? generateWheelLayout(20,'low',config.houseEdge).slice(-1)[0].toFixed(2)+'× boost' : item.type === 'plinko' ? `${generatePlinkoPayout(16,'medium',config.houseEdge)[0].toFixed(2)}× edge` : item.type === 'keno' ? `${generateKenoTable('classic',config.houseEdge)[5][5].toFixed(2)}× 5 hits` : blackjack ? '3:2 natural · 1:1 normal · S17' : `${((1-config.houseEdge)*100).toFixed(2)}% theoretical RTP`}</b></div></article>})}</section>
         <section className="admin-audit"><h2>Configuration history</h2>{adminAudit.map(entry=><div key={entry.version}><b>v{entry.version}</b><span>{entry.summary}</span><time>{new Date(entry.updatedAt).toLocaleString()}</time></div>)}</section>
       </main>}
 
@@ -938,12 +1041,12 @@ export default function App() {
             </div>
           ) : null}
 
-          <GameVisual game={selectedGame} houseEdge={platformConfig?.games[selectedGame].houseEdge ?? .01} running={visualRunning || kenoAnimating} result={selectedGame === 'keno' ? kenoResult : visualResult} crashValue={crashValue} crashPhase={crashPhase} minesRound={minesRound} minesGridSize={minesGridSize} kenoNumbers={kenoDrawReveal} kenoRisk={kenoRisk} wheelSegments={wheelSegments} wheelLayout={wheelLayout} wheelRotation={wheelRotation} limboTarget={limboTarget} plinkoRows={plinkoRows} plinkoRisk={plinkoRisk} diceChance={diceChance} diceSide={diceSide} kenoPicks={kenoPicks} kenoAnimating={kenoAnimating} onMineClick={revealMine} onKenoClick={toggleKenoNumber} />
+          <GameVisual game={selectedGame} houseEdge={platformConfig?.games[selectedGame].houseEdge ?? .01} running={visualRunning || kenoAnimating} result={selectedGame === 'keno' ? kenoResult : visualResult} blackjackRound={blackjackRound} crashValue={crashValue} crashPhase={crashPhase} minesRound={minesRound} minesGridSize={minesGridSize} kenoNumbers={kenoDrawReveal} kenoRisk={kenoRisk} wheelSegments={wheelSegments} wheelLayout={wheelLayout} wheelRotation={wheelRotation} limboTarget={limboTarget} plinkoRows={plinkoRows} plinkoRisk={plinkoRisk} diceChance={diceChance} diceSide={diceSide} kenoPicks={kenoPicks} kenoAnimating={kenoAnimating} onMineClick={revealMine} onKenoClick={toggleKenoNumber} />
 
           {selectedGame !== 'keno' && <div className="card common-bet-card" style={{ marginTop: '1rem' }}>
             <div className="control-tabs">
               <button disabled={autoRunning} className={betMode === 'manual' ? 'active' : ''} onClick={() => setBetMode('manual')}>Manual</button>
-              <button disabled={autoRunning} className={betMode === 'auto' ? 'active' : ''} onClick={() => setBetMode('auto')}>Auto</button>
+              <button disabled={autoRunning || selectedGame === 'blackjack'} title={selectedGame === 'blackjack' ? 'Autoplay strategy is not defined in the Blackjack specification' : undefined} className={betMode === 'auto' ? 'active' : ''} onClick={() => setBetMode('auto')}>Auto</button>
             </div>
             <label className="label">Bet amount</label>
             <input
@@ -952,7 +1055,7 @@ export default function App() {
               value={amountInput}
               min={0.1}
               step={0.1}
-              disabled={autoRunning}
+              disabled={autoRunning || Boolean(selectedGame === 'blackjack' && blackjackRound && blackjackRound.phase !== 'settled')}
               onChange={(event) => setAmountInput(Number(event.target.value))}
             />
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
@@ -960,7 +1063,7 @@ export default function App() {
                 <button
                   key={value}
                   className="button secondary"
-                  disabled={autoRunning}
+                  disabled={autoRunning || Boolean(selectedGame === 'blackjack' && blackjackRound && blackjackRound.phase !== 'settled')}
                   onClick={() => setAmountInput(clamp(amountInput * value, 0.1, 10000))}
                 >
                   {value}×
@@ -1223,7 +1326,24 @@ export default function App() {
             </div>
           )}
 
-          {selectedGame === 'blackjack' && <div className="card game-specific-controls"><div className="info-ribbon"><span>Infinite shoe</span><b>Dealer stands on soft 17</b><span>Blackjack 3:2</span></div><button className="button success primary-game-action" disabled={visualRunning} onClick={()=>placeBet('blackjack',{})}>{visualRunning?'Dealing…':'Deal cards'}</button></div>}
+          {selectedGame === 'blackjack' && <div className="card game-specific-controls blackjack-controls">
+            <div className="info-ribbon"><span>Infinite shoe</span><b>Dealer stands on all 17s</b><span>Blackjack 3:2</span><span>RTP {(BLACKJACK_MIN_RTP * 100).toFixed(2)}%</span></div>
+            {!blackjackRound || blackjackRound.phase === 'settled' ? <>
+              {blackjackRound?.phase === 'settled' && <div className={`blackjack-settlement ${blackjackRound.net > 0 ? 'positive' : blackjackRound.net < 0 ? 'negative' : ''}`}><span>{blackjackRound.outcome}</span><strong>{blackjackRound.net >= 0 ? '+' : ''}{formatCash(blackjackRound.net)}</strong><small>Risked {formatCash(blackjackRound.totalRisked)} · Returned {formatCash(blackjackRound.payout)}</small></div>}
+              <button className="button success primary-game-action" disabled={blackjackBusy} onClick={startBlackjack}>{blackjackBusy ? 'Dealing…' : blackjackRound ? 'Bet Again' : 'Deal'}</button>
+            </> : null}
+            {blackjackRound?.phase === 'insurance' && <div className="insurance-offer"><div><strong>Insurance?</strong><span>Dealer shows an Ace. Side wager {formatCash(blackjackRound.baseBet / 2)} · pays 2:1.</span></div><div className="blackjack-action-grid two-actions"><button className="button secondary" disabled={blackjackBusy} onClick={() => decideBlackjackInsurance(false)}>No Insurance</button><button className="button success" disabled={blackjackBusy || (session?.balance ?? 0) < blackjackRound.baseBet / 2} title={(session?.balance ?? 0) < blackjackRound.baseBet / 2 ? 'Insufficient balance for insurance' : undefined} onClick={() => decideBlackjackInsurance(true)}>Take Insurance</button></div></div>}
+            {blackjackRound?.phase === 'player' && <>
+              <div className="active-hand-summary"><span>Playing hand {blackjackRound.activeHandIndex + 1} of {blackjackRound.hands.length}</span><strong>{blackjackRound.hands[blackjackRound.activeHandIndex]?.total}{blackjackRound.hands[blackjackRound.activeHandIndex]?.soft ? ' soft' : ''}</strong></div>
+              <div className="blackjack-action-grid">
+                <button className="button blackjack-hit" disabled={blackjackBusy || !blackjackRound.actions.hit} onClick={() => actBlackjack('hit')}>Hit</button>
+                <button className="button blackjack-stand" disabled={blackjackBusy || !blackjackRound.actions.stand} onClick={() => actBlackjack('stand')}>Stand</button>
+                <button className="button secondary" disabled={blackjackBusy || !blackjackRound.actions.double} title={!blackjackRound.actions.double ? 'Requires an eligible two-card hand and enough balance' : undefined} onClick={() => actBlackjack('double')}>Double</button>
+                <button className="button secondary" disabled={blackjackBusy || !blackjackRound.actions.split} title={!blackjackRound.actions.split ? 'Requires identical ranks and enough balance; re-splitting is disabled' : undefined} onClick={() => actBlackjack('split')}>Split</button>
+              </div>
+            </>}
+            {blackjackRound && blackjackRound.phase !== 'settled' && <div className="round-ledger"><span>Base bet <b>{formatCash(blackjackRound.baseBet)}</b></span><span>Total risked <b>{formatCash(blackjackRound.totalRisked)}</b></span><span>Round <b>#{blackjackRound.nonce}</b></span></div>}
+          </div>}
 
           {selectedGame === 'rps' && <div className="card game-specific-controls"><p className="label">Choose your hand</p><div className="choice-cards">{([['rock','✊'],['paper','✋'],['scissors','✌️']] as const).map(([choice,icon])=><button key={choice} className={rpsChoice===choice?'active':''} onClick={()=>setRpsChoice(choice)}><b>{icon}</b><span>{choice}</span></button>)}</div><button className="button success primary-game-action" disabled={visualRunning} onClick={()=>placeBet('rps',{choice:rpsChoice})}>{visualRunning?'Revealing…':'Play round'}</button></div>}
 

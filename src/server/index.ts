@@ -1,7 +1,7 @@
 import path from 'path';
 import express from 'express';
 import cookieParser from 'cookie-parser';
-import { newSeed, sha256Hex } from '../common/rng.js';
+import { newSeed, rngFloatStream, sha256Hex } from '../common/rng.js';
 import {
   DEFAULT_BALANCE,
   crashBet,
@@ -14,10 +14,17 @@ import {
   wheelBet,
   limboBet,
   MAX_PAYOUT_MULTIPLIER,
-  kenoOutcome
-  ,rpsBet, blackjackBet, towerBet, chickenBet
+  kenoOutcome,
+  rpsBet,
+  towerBet,
+  chickenBet,
+  BLACKJACK_HOUSE_EDGE,
+  BLACKJACK_MIN_RTP,
+  blackjackCardFromFloat,
+  blackjackHandValue,
+  isBlackjackNatural
 } from '../common/game.js';
-import type { BetResult, CrashRound, MineRound, GameType, PlatformConfig } from '../common/types.js';
+import type { BetResult, BlackjackAction, BlackjackCard, BlackjackHand, BlackjackRound, CrashRound, MineRound, GameType, PlatformConfig } from '../common/types.js';
 
 const app = express();
 const sessions = new Map<string, any>();
@@ -25,7 +32,7 @@ const SESSION_COOKIE = 'originals_session';
 const PORT = Number(process.env.PORT ?? 4174);
 const gameTypes: GameType[] = ['dice', 'limbo', 'crash', 'plinko', 'mines', 'wheel', 'keno', 'blackjack', 'rps', 'tower', 'chicken'];
 const defaultGameConfig = { enabled: true, houseEdge: 0.01, minBet: 0.1, maxBet: 1000, maxPayout: 100000 };
-let platformConfig: PlatformConfig = { version: 1, updatedAt: new Date().toISOString(), games: Object.fromEntries(gameTypes.map(game => [game, { ...defaultGameConfig }])) as PlatformConfig['games'] };
+let platformConfig: PlatformConfig = { version: 1, updatedAt: new Date().toISOString(), games: Object.fromEntries(gameTypes.map(game => [game, { ...defaultGameConfig, houseEdge: game === 'blackjack' ? BLACKJACK_HOUSE_EDGE : defaultGameConfig.houseEdge }])) as PlatformConfig['games'] };
 const configAudit: Array<{ version: number; updatedAt: string; summary: string }> = [{ version: 1, updatedAt: platformConfig.updatedAt, summary: 'Default configuration' }];
 const money = (value: number) => Number(value.toFixed(2));
 
@@ -50,7 +57,8 @@ async function ensureSession(req: express.Request) {
       recentResults: [] as BetResult[],
       seedHistory: [] as Array<{ hash: string; reveal?: string }> ,
       crashRound: null as CrashRound | null,
-      mineRound: null as MineRound | null
+      mineRound: null as MineRound | null,
+      blackjackRound: null as InternalBlackjackRound | null
     };
     session.serverSeedHash = '';
     sessions.set(sessionId, session);
@@ -89,6 +97,126 @@ function publicMineRound(round: MineRound) {
   };
 }
 
+type InternalBlackjackRound = Omit<BlackjackRound, 'dealerCards' | 'actions'> & {
+  dealerCards: BlackjackCard[];
+  stream: BlackjackCard[];
+  cursor: number;
+  settled: boolean;
+  processedRequestIds: Set<string>;
+};
+
+const emptyBlackjackActions = (): Record<BlackjackAction, boolean> => ({ hit: false, stand: false, double: false, split: false });
+
+function refreshBlackjackHand(hand: BlackjackHand) {
+  const value = blackjackHandValue(hand.cards);
+  hand.total = value.total;
+  hand.soft = value.soft;
+}
+
+function drawBlackjackCard(round: InternalBlackjackRound) {
+  const card = round.stream[round.cursor];
+  if (!card) throw new Error('Committed Blackjack card stream exhausted');
+  round.cursor += 1;
+  return card;
+}
+
+function dealerHasBlackjack(round: InternalBlackjackRound) {
+  return isBlackjackNatural(round.dealerCards);
+}
+
+function blackjackActions(round: InternalBlackjackRound, balance: number): Record<BlackjackAction, boolean> {
+  const actions = emptyBlackjackActions();
+  if (round.phase !== 'player') return actions;
+  const hand = round.hands[round.activeHandIndex];
+  if (!hand || hand.status !== 'active') return actions;
+  actions.hit = hand.total < 21 && !hand.splitAces;
+  actions.stand = true;
+  actions.double = hand.cards.length === 2 && !hand.splitAces && balance >= hand.wager;
+  actions.split = round.hands.length === 1 && hand.cards.length === 2 && hand.cards[0].rank === hand.cards[1].rank && balance >= hand.wager;
+  return actions;
+}
+
+function publicBlackjackRound(round: InternalBlackjackRound, balance: number): BlackjackRound {
+  const concealDealer = round.phase !== 'settled';
+  const dealerCards = round.dealerCards.map((card, index) => concealDealer && index === 1 ? { hidden: true } : { ...card });
+  const dealerTotal = concealDealer ? blackjackHandValue(round.dealerCards.slice(0, 1)).total : blackjackHandValue(round.dealerCards).total;
+  return {
+    id: round.id,
+    requestId: round.requestId,
+    version: round.version,
+    nonce: round.nonce,
+    baseBet: round.baseBet,
+    phase: round.phase,
+    dealerCards,
+    dealerTotal,
+    hands: round.hands.map(hand => ({ ...hand, cards: hand.cards.map(card => ({ ...card })) })),
+    activeHandIndex: round.activeHandIndex,
+    insurance: { ...round.insurance },
+    actions: blackjackActions(round, balance),
+    totalRisked: round.totalRisked,
+    payout: round.payout,
+    net: round.net,
+    outcome: round.outcome,
+    startedAt: round.startedAt
+  };
+}
+
+function settleBlackjack(session: any, round: InternalBlackjackRound) {
+  if (round.settled) return;
+  const dealer = blackjackHandValue(round.dealerCards);
+  const dealerNatural = dealerHasBlackjack(round);
+  let mainCredit = 0;
+  for (const hand of round.hands) {
+    refreshBlackjackHand(hand);
+    let result: BlackjackHand['result'];
+    let credit = 0;
+    if (hand.total > 21) result = 'bust';
+    else if (dealerNatural) {
+      if (hand.natural) { result = 'push'; credit = hand.wager; }
+      else result = 'loss';
+    } else if (hand.natural) { result = 'blackjack'; credit = hand.wager * 2.5; }
+    else if (dealer.total > 21 || hand.total > dealer.total) { result = 'win'; credit = hand.wager * 2; }
+    else if (hand.total === dealer.total) { result = 'push'; credit = hand.wager; }
+    else result = 'loss';
+    hand.result = result;
+    hand.payout = money(credit);
+    hand.status = 'resolved';
+    mainCredit += hand.payout;
+  }
+  round.payout = money(mainCredit + round.insurance.payout);
+  round.net = money(round.payout - round.totalRisked);
+  round.phase = 'settled';
+  round.settled = true;
+  const wins = round.hands.filter(hand => hand.result === 'win' || hand.result === 'blackjack').length;
+  const pushes = round.hands.filter(hand => hand.result === 'push').length;
+  const losses = round.hands.length - wins - pushes;
+  round.outcome = wins ? `${wins} hand${wins === 1 ? '' : 's'} won${losses ? `, ${losses} lost` : ''}` : pushes && !losses ? 'Push' : losses ? `${losses} hand${losses === 1 ? '' : 's'} lost` : 'Settled';
+  session.balance = money(session.balance + round.payout);
+  const result: BetResult = {
+    game: 'blackjack',
+    outcome: round.outcome,
+    won: round.net > 0,
+    payout: round.payout,
+    multiplier: round.totalRisked ? Number((round.payout / round.totalRisked).toFixed(2)) : 0,
+    details: { roundId: round.id, nonce: round.nonce, baseBet: round.baseBet, totalRisked: round.totalRisked, insurance: { ...round.insurance }, dealer: round.dealerCards, dealerTotal: dealer.total, hands: round.hands }
+  };
+  flushRecent(session, result);
+}
+
+function finishBlackjackPlayerTurn(session: any, round: InternalBlackjackRound) {
+  const nextIndex = round.hands.findIndex((hand, index) => index > round.activeHandIndex && hand.status === 'pending');
+  if (nextIndex >= 0) {
+    round.activeHandIndex = nextIndex;
+    round.hands[nextIndex].status = 'active';
+    return;
+  }
+  const liveHand = round.hands.some(hand => hand.total <= 21);
+  if (liveHand) {
+    while (blackjackHandValue(round.dealerCards).total < 17) round.dealerCards.push(drawBlackjackCard(round));
+  }
+  settleBlackjack(session, round);
+}
+
 app.use(express.json());
 app.use(cookieParser());
 app.use(async (req, res, next) => {
@@ -101,6 +229,7 @@ app.use(async (req, res, next) => {
 
 app.post('/api/client-seed', async (req, res) => {
   const session = (req as any).session;
+  if (session.blackjackRound && session.blackjackRound.phase !== 'settled') return res.status(409).json({ error: 'Finish the active Blackjack round before changing seeds' });
   const { clientSeed } = req.body;
   if (!clientSeed || typeof clientSeed !== 'string') {
     return res.status(400).json({ error: 'clientSeed required' });
@@ -124,6 +253,7 @@ app.get('/api/session', (req, res) => {
 
 app.post('/api/rotate-seed', async (req, res) => {
   const session = (req as any).session;
+  if (session.blackjackRound && session.blackjackRound.phase !== 'settled') return res.status(409).json({ error: 'Finish the active Blackjack round before rotating seeds' });
   const previous = session.serverSeed;
   const previousHash = session.serverSeedHash;
   const revealed = previous;
@@ -185,6 +315,7 @@ app.post('/api/admin/config', (req, res) => {
       if (!item || typeof item.enabled !== 'boolean') throw new Error(`Invalid ${game} configuration`);
       const houseEdge = Number(item.houseEdge); const minBet = Number(item.minBet); const maxBet = Number(item.maxBet); const maxPayout = Number(item.maxPayout);
       if (houseEdge < 0.001 || houseEdge > 0.15) throw new Error(`${game} margin must be between 0.1% and 15%`);
+      if (game === 'blackjack' && houseEdge > BLACKJACK_HOUSE_EDGE + Number.EPSILON) throw new Error(`Blackjack RTP cannot be lower than ${(BLACKJACK_MIN_RTP * 100).toFixed(2)}% (maximum house margin ${(BLACKJACK_HOUSE_EDGE * 100).toFixed(2)}%)`);
       if (minBet <= 0 || maxBet < minBet || maxPayout < maxBet) throw new Error(`${game} limits are inconsistent`);
       games[game] = { enabled: item.enabled, houseEdge, minBet, maxBet, maxPayout };
     }
@@ -219,7 +350,7 @@ app.post('/api/bet', async (req, res) => {
       case 'keno':
         result = await kenoBet(session.serverSeed, session.clientSeed, session.nonce, params, platformConfig.games.keno.houseEdge);
         break;
-      case 'blackjack': result = await blackjackBet(session.serverSeed, session.clientSeed, session.nonce, platformConfig.games.blackjack.houseEdge); break;
+      case 'blackjack': return res.status(400).json({ error: 'Use the Blackjack round controls to Deal and choose actions' });
       case 'rps': result = await rpsBet(session.serverSeed, session.clientSeed, session.nonce, params, platformConfig.games.rps.houseEdge); break;
       case 'tower': result = await towerBet(session.serverSeed, session.clientSeed, session.nonce, params, platformConfig.games.tower.houseEdge); break;
       case 'chicken': result = await chickenBet(session.serverSeed, session.clientSeed, session.nonce, params, platformConfig.games.chicken.houseEdge); break;
@@ -231,6 +362,156 @@ app.post('/api/bet', async (req, res) => {
   } catch (error: any) {
     return res.status(400).json({ error: error.message || 'Bet failed' });
   }
+});
+
+app.get('/api/blackjack/state', (req, res) => {
+  const session = (req as any).session;
+  const round = session.blackjackRound as InternalBlackjackRound | null;
+  return res.json({ round: round ? publicBlackjackRound(round, session.balance) : null, balance: session.balance, nonce: session.nonce });
+});
+
+app.post('/api/blackjack/start', async (req, res) => {
+  const session = (req as any).session;
+  const amount = Number(req.body?.amount);
+  const requestId = typeof req.body?.requestId === 'string' && req.body.requestId ? req.body.requestId : '';
+  const existing = session.blackjackRound as InternalBlackjackRound | null;
+  if (existing && existing.requestId === requestId && requestId) return res.json({ round: publicBlackjackRound(existing, session.balance), balance: session.balance, nonce: session.nonce });
+  if (existing && existing.phase !== 'settled') return res.status(409).json({ error: 'A Blackjack round is already in progress', round: publicBlackjackRound(existing, session.balance) });
+  if (!requestId) return res.status(400).json({ error: 'A request key is required' });
+  try {
+    validateStake('blackjack', amount, session.balance);
+    const nonce = session.nonce;
+    const floats = await rngFloatStream(session.serverSeed, session.clientSeed, nonce, 128);
+    const stream = floats.map(blackjackCardFromFloat);
+    const round: InternalBlackjackRound = {
+      id: `${Date.now()}-${nonce}`,
+      requestId,
+      version: 1,
+      nonce,
+      baseBet: money(amount),
+      phase: 'player',
+      dealerCards: [],
+      hands: [],
+      activeHandIndex: 0,
+      insurance: { offered: false, decided: false, taken: false, wager: 0, payout: 0 },
+      totalRisked: money(amount),
+      payout: 0,
+      net: money(-amount),
+      startedAt: Date.now(),
+      stream,
+      cursor: 0,
+      settled: false,
+      processedRequestIds: new Set()
+    };
+    const playerCards = [drawBlackjackCard(round)];
+    round.dealerCards.push(drawBlackjackCard(round));
+    playerCards.push(drawBlackjackCard(round));
+    round.dealerCards.push(drawBlackjackCard(round));
+    const playerValue = blackjackHandValue(playerCards);
+    round.hands.push({ id: 'hand-1', cards: playerCards, wager: money(amount), status: 'active', total: playerValue.total, soft: playerValue.soft, natural: isBlackjackNatural(playerCards), splitAces: false, doubled: false, payout: 0 });
+    session.balance = money(session.balance - amount);
+    session.nonce += 1;
+    session.blackjackRound = round;
+
+    const upRank = round.dealerCards[0].rank;
+    if (upRank === 1) {
+      round.phase = 'insurance';
+      round.insurance.offered = true;
+    } else if (upRank >= 10 && dealerHasBlackjack(round)) {
+      settleBlackjack(session, round);
+    } else if (round.hands[0].natural) {
+      settleBlackjack(session, round);
+    }
+    return res.json({ round: publicBlackjackRound(round, session.balance), balance: session.balance, nonce: session.nonce });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message || 'Unable to start Blackjack round' });
+  }
+});
+
+app.post('/api/blackjack/insurance', (req, res) => {
+  const session = (req as any).session;
+  const round = session.blackjackRound as InternalBlackjackRound | null;
+  if (!round) return res.status(400).json({ error: 'No Blackjack round found' });
+  const requestId = typeof req.body?.requestId === 'string' ? req.body.requestId : '';
+  if (requestId && round.processedRequestIds.has(requestId)) return res.json({ round: publicBlackjackRound(round, session.balance), balance: session.balance, nonce: session.nonce });
+  if (!requestId) return res.status(400).json({ error: 'A request key is required for the insurance decision' });
+  if (req.body?.roundId !== round.id || req.body?.version !== round.version) return res.status(409).json({ error: 'Blackjack round changed; restored the latest state', round: publicBlackjackRound(round, session.balance) });
+  if (round.phase !== 'insurance') return res.status(409).json({ error: 'Insurance decision is no longer available', round: publicBlackjackRound(round, session.balance) });
+  const take = req.body?.take === true;
+  const stake = money(round.baseBet / 2);
+  if (take && session.balance < stake) return res.status(400).json({ error: 'Insufficient balance for insurance', round: publicBlackjackRound(round, session.balance) });
+  round.insurance.decided = true;
+  round.insurance.taken = take;
+  if (take) {
+    round.insurance.wager = stake;
+    round.totalRisked = money(round.totalRisked + stake);
+    session.balance = money(session.balance - stake);
+  }
+  if (dealerHasBlackjack(round)) {
+    if (take) round.insurance.payout = money(stake * 3);
+    settleBlackjack(session, round);
+  } else if (round.hands[0].natural) {
+    settleBlackjack(session, round);
+  } else {
+    round.phase = 'player';
+  }
+  round.processedRequestIds.add(requestId);
+  round.version += 1;
+  return res.json({ round: publicBlackjackRound(round, session.balance), balance: session.balance, nonce: session.nonce });
+});
+
+app.post('/api/blackjack/action', (req, res) => {
+  const session = (req as any).session;
+  const round = session.blackjackRound as InternalBlackjackRound | null;
+  const action = req.body?.action as BlackjackAction;
+  if (!round) return res.status(400).json({ error: 'No Blackjack round found' });
+  const requestId = typeof req.body?.requestId === 'string' ? req.body.requestId : '';
+  if (requestId && round.processedRequestIds.has(requestId)) return res.json({ round: publicBlackjackRound(round, session.balance), balance: session.balance, nonce: session.nonce });
+  if (!requestId) return res.status(400).json({ error: 'A request key is required for the Blackjack action' });
+  if (req.body?.roundId !== round.id || req.body?.version !== round.version) return res.status(409).json({ error: 'Blackjack round changed; restored the latest state', round: publicBlackjackRound(round, session.balance) });
+  if (round.phase !== 'player') return res.status(409).json({ error: 'The Blackjack round is not awaiting a player action', round: publicBlackjackRound(round, session.balance) });
+  if (!['hit', 'stand', 'double', 'split'].includes(action)) return res.status(400).json({ error: 'Invalid Blackjack action' });
+  const allowed = blackjackActions(round, session.balance);
+  if (!allowed[action]) return res.status(400).json({ error: action === 'double' || action === 'split' ? `Unable to ${action}; check hand eligibility and balance` : `${action} is unavailable`, round: publicBlackjackRound(round, session.balance) });
+  const hand = round.hands[round.activeHandIndex];
+  if (action === 'hit') {
+    hand.cards.push(drawBlackjackCard(round));
+    refreshBlackjackHand(hand);
+    if (hand.total >= 21) {
+      hand.status = hand.total > 21 ? 'bust' : 'standing';
+      finishBlackjackPlayerTurn(session, round);
+    }
+  } else if (action === 'stand') {
+    hand.status = 'standing';
+    finishBlackjackPlayerTurn(session, round);
+  } else if (action === 'double') {
+    session.balance = money(session.balance - hand.wager);
+    round.totalRisked = money(round.totalRisked + hand.wager);
+    hand.wager = money(hand.wager * 2);
+    hand.doubled = true;
+    hand.cards.push(drawBlackjackCard(round));
+    refreshBlackjackHand(hand);
+    hand.status = hand.total > 21 ? 'bust' : 'standing';
+    finishBlackjackPlayerTurn(session, round);
+  } else {
+    session.balance = money(session.balance - hand.wager);
+    round.totalRisked = money(round.totalRisked + hand.wager);
+    const firstCard = hand.cards[0];
+    const secondCard = hand.cards[1];
+    const splitAces = firstCard.rank === 1;
+    const firstCards = [firstCard, drawBlackjackCard(round)];
+    const secondCards = [secondCard, drawBlackjackCard(round)];
+    const makeHand = (id: string, cards: BlackjackCard[], status: BlackjackHand['status']): BlackjackHand => {
+      const value = blackjackHandValue(cards);
+      return { id, cards, wager: hand.wager, status, total: value.total, soft: value.soft, natural: false, splitAces, doubled: false, payout: 0 };
+    };
+    round.hands = [makeHand('hand-1', firstCards, splitAces ? 'locked' : 'active'), makeHand('hand-2', secondCards, splitAces ? 'locked' : 'pending')];
+    round.activeHandIndex = 0;
+    if (splitAces) finishBlackjackPlayerTurn(session, round);
+  }
+  round.processedRequestIds.add(requestId);
+  round.version += 1;
+  return res.json({ round: publicBlackjackRound(round, session.balance), balance: session.balance, nonce: session.nonce });
 });
 
 app.post('/api/crash/start', async (req, res) => {

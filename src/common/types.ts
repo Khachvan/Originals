@@ -64,3 +64,58 @@ export interface CrashRound {
   cashedOutAt?: number;
   payout: number;
 }
+
+export type BlackjackSuit = 'clubs' | 'diamonds' | 'hearts' | 'spades';
+export type BlackjackPhase = 'insurance' | 'player' | 'settled';
+export type BlackjackAction = 'hit' | 'stand' | 'double' | 'split';
+export type BlackjackHandStatus = 'active' | 'pending' | 'standing' | 'bust' | 'locked' | 'resolved';
+
+export interface BlackjackCard {
+  index: number;
+  rank: number;
+  suit: BlackjackSuit;
+}
+
+export interface BlackjackCardView extends Partial<BlackjackCard> {
+  hidden?: boolean;
+}
+
+export interface BlackjackHand {
+  id: string;
+  cards: BlackjackCard[];
+  wager: number;
+  status: BlackjackHandStatus;
+  total: number;
+  soft: boolean;
+  natural: boolean;
+  splitAces: boolean;
+  doubled: boolean;
+  result?: 'blackjack' | 'win' | 'push' | 'loss' | 'bust';
+  payout: number;
+}
+
+export interface BlackjackRound {
+  id: string;
+  requestId: string;
+  version: number;
+  nonce: number;
+  baseBet: number;
+  phase: BlackjackPhase;
+  dealerCards: BlackjackCardView[];
+  dealerTotal?: number;
+  hands: BlackjackHand[];
+  activeHandIndex: number;
+  insurance: {
+    offered: boolean;
+    decided: boolean;
+    taken: boolean;
+    wager: number;
+    payout: number;
+  };
+  actions: Record<BlackjackAction, boolean>;
+  totalRisked: number;
+  payout: number;
+  net: number;
+  outcome?: string;
+  startedAt: number;
+}
