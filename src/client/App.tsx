@@ -69,6 +69,13 @@ function BlackjackActionIcon({ action }: { action: BlackjackAction }) {
   return <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="7" width="11" height="18" rx="2"/><rect x="18" y="7" width="11" height="18" rx="2"/><path d="M11 4 7 1 3 4M21 4l4-3 4 3"/></svg>;
 }
 
+function OriginalsMark({ className }: { className?: string }) {
+  return <svg className={className} viewBox="0 0 128 128" fill="none" aria-hidden="true" focusable="false">
+    <path fill="currentColor" d="m47.382 54.414-11.066 6.34v-12.68l11.066-6.455z"/>
+    <path fill="currentColor" fillRule="evenodd" d="M119.313 32v64l-55.331 32L8.65 96V32L63.982 0zm-99.597 6.305v51.13l11.034 6.478 5.566-3.227V79.89l27.666-15.908v44.657l5.533 3.144 11.067-6.373V86.275l16.6 9.568 11.065-6.455v-6.34L86.115 70.252l22.163-12.68v-12.85l-5.565-3.173-22.101 12.68V35.21l-11.097-6.39-5.533 3.047v-12.61l-5.418-3.228z"/>
+  </svg>;
+}
+
 function GameVisual({ game, houseEdge, running, result, blackjackRound, blackjackDealerVisibleCount, blackjackInitialDealAnimating, crashValue, crashPhase, minesRound, minesGridSize, kenoNumbers, kenoRisk, wheelSegments, wheelLayout, wheelRotation, limboTarget, plinkoRows, plinkoRisk, diceChance, diceSide, kenoPicks, kenoAnimating, onMineClick, onKenoClick }: { game: GameType; houseEdge: number; running: boolean; result: BetResult | null; blackjackRound: BlackjackRound | null; blackjackDealerVisibleCount: number | null; blackjackInitialDealAnimating: boolean; crashValue: number; crashPhase: string; minesRound: any; minesGridSize: number; kenoNumbers: number[]; kenoRisk: 'classic' | 'low' | 'medium' | 'high'; wheelSegments: number; wheelLayout: number[]; wheelRotation: number; limboTarget: number; plinkoRows: number; plinkoRisk: 'low' | 'medium' | 'high' | 'rain'; diceChance: number; diceSide: 'over' | 'under'; kenoPicks: number[]; kenoAnimating: boolean; onMineClick: (index: number) => void; onKenoClick: (value: number) => void }) {
   const status = running ? 'BET IN PLAY' : result ? `${result.won ? 'WIN' : 'LOSS'} · ${result.outcome}` : 'READY';
   if (game === 'plinko') {
@@ -142,7 +149,7 @@ function GameVisual({ game, houseEdge, running, result, blackjackRound, blackjac
       const classes = ['playing-card', item.hidden ? 'hidden-card' : '', redSuit ? 'red-suit' : '', motion === 'deal' ? 'dealing-card' : '', motion === 'reveal' ? 'dealer-reveal' : ''].filter(Boolean).join(' ');
       return <b key={stableKey ?? `${item.index}-${index}`} className={classes} aria-label={item.hidden ? 'Hidden dealer card' : `${rankLabel(item.rank)} of ${item.suit}`} style={{ '--deal-step': dealStep, '--card-position': index } as React.CSSProperties}>
         {!item.hidden && <span className="card-value">{rankLabel(item.rank)}<i>{suitLabel(item.suit)}</i></span>}
-        {(item.hidden || motion === 'reveal') && <span className="card-back-mark" aria-hidden="true">O</span>}
+        {(item.hidden || motion === 'reveal') && <span className="card-back-mark" aria-hidden="true"><OriginalsMark className="card-back-logo"/></span>}
       </b>;
     };
     const initialDeal = blackjackInitialDealAnimating && blackjackRound?.version === 1 && blackjackRound.phase !== 'settled';
@@ -163,6 +170,7 @@ function GameVisual({ game, houseEdge, running, result, blackjackRound, blackjac
     const tableStatus = running ? 'DEALING…' : !blackjackRound ? 'PLACE A BET TO START' : blackjackRound.phase === 'insurance' ? 'INSURANCE DECISION' : blackjackRound.phase === 'player' ? `HAND ${blackjackRound.activeHandIndex + 1} · YOUR MOVE` : `${blackjackRound.outcome?.toUpperCase()} · ${blackjackRound.net >= 0 ? '+' : ''}${formatCash(blackjackRound.net)}`;
     return <div className={`visual-stage table-visual blackjack-${blackjackRound?.phase ?? 'ready'} ${running ? 'is-running' : ''}`} aria-live="polite">
       <div className="shoe-stack">▤<small>INFINITE SHOE</small></div>
+      <OriginalsMark className="table-brand-mark"/>
       <div className="dealer-hand"><small>DEALER <em key={`dealer-total-${blackjackDealerVisibleCount}-${stagedDealerTotal}`} className={blackjackDealerVisibleCount !== null ? 'dealer-total-counting' : ''}>{stagedDealerTotal ?? '—'}</em></small><div>{blackjackRound?.dealerCards.map(dealerCard)}</div></div>
       <div className="felt-mark"><b>BLACKJACK PAYS 3 TO 2</b><span>INSURANCE PAYS 2 TO 1</span></div>
       <div className={`blackjack-hands ${blackjackRound?.hands.length === 2 ? 'is-split' : ''}`}>

@@ -137,6 +137,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .dealer-hand .playing-card.dealing-card,.player-hand .playing-card.dealing-card{animation:cardDealFromShoe .5625s calc(var(--deal-step,0) * .35s) cubic-bezier(.16,.76,.2,1) backwards}
 .playing-card .card-value{display:block}
 .playing-card .card-back-mark{position:absolute;z-index:2;inset:50% auto auto 50%;display:grid;place-items:center;width:30px;height:30px;border:1px solid #fff8;border-radius:50%;color:#fff;font-weight:950;opacity:0;transform:translate(-50%,-50%)}
+.playing-card .card-back-logo{width:18px;height:18px;filter:drop-shadow(0 1px 2px #0007)}
 .playing-card.hidden-card .card-back-mark{opacity:1}
 .playing-card.dealer-reveal{transform-origin:center;animation:dealerHoleReveal .7s cubic-bezier(.45,0,.55,1) both}
 .playing-card.dealer-reveal .card-value{animation:dealerFaceReveal .7s step-end both}
@@ -150,6 +151,10 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 @media(max-width:700px){.dealer-hand .playing-card{--deck-x:42vw;--deck-y:105px}.player-hand .playing-card{--deck-x:42vw;--deck-y:-82px}.playing-card .card-back-mark{width:22px;height:22px;font-size:12px}}
 @media(max-width:380px){.shoe-stack{right:-2%;display:grid;transform:scale(.55)}}
 @media(prefers-reduced-motion:reduce){.playing-card .card-value,.playing-card .card-back-mark{animation:none!important}}
+
+.table-brand-mark{position:absolute;z-index:1;left:7%;top:48%;width:74px;height:74px;color:#d9eee7;opacity:.075;pointer-events:none;filter:drop-shadow(0 5px 8px #001a14)}
+@media(max-width:700px){.table-brand-mark{left:3%;top:49%;width:44px;height:44px;opacity:.065}.playing-card .card-back-logo{width:14px;height:14px}}
+.game-mode .main-grid.mobile .table-brand-mark{left:3%;top:49%;width:46px;height:46px;opacity:.065}
 
 /* Compact Blackjack controls and settlement feedback. */
 .blackjack-result-toast{position:absolute;z-index:8;left:50%;top:50%;display:flex;align-items:center;gap:8px;padding:7px 11px;border:1px solid #ffffff24;border-radius:7px;background:#101a20e8;box-shadow:0 8px 24px #0008;transform:translate(-50%,-50%);animation:blackjackToastIn .28s cubic-bezier(.18,1.35,.32,1);backdrop-filter:blur(6px)}
