@@ -138,6 +138,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .playing-card .card-value{display:block}
 .playing-card .card-back-mark{position:absolute;z-index:2;inset:50% auto auto 50%;display:grid;place-items:center;width:30px;height:30px;border:1px solid #fff8;border-radius:50%;color:#fff;font-weight:950;opacity:0;transform:translate(-50%,-50%)}
 .playing-card .card-back-logo{width:18px;height:18px;filter:drop-shadow(0 1px 2px #0007)}
+.shoe-stack .shoe-brand-logo{width:34px;height:34px;color:#f1f7fb;filter:drop-shadow(0 2px 3px #001b30)}
 .playing-card.hidden-card .card-back-mark{opacity:1}
 .playing-card.dealer-reveal{transform-origin:center;animation:dealerHoleReveal .7s cubic-bezier(.45,0,.55,1) both}
 .playing-card.dealer-reveal .card-value{animation:dealerFaceReveal .7s step-end both}

@@ -32,7 +32,7 @@ const gameList: Array<{ type: GameType; label: string; description: string }> = 
   { type: 'mines', label: 'Mines', description: 'Reveal safe tiles, cash out before a mine.' },
   { type: 'wheel', label: 'Wheel', description: 'Spin a segment wheel for a payout.' },
   { type: 'keno', label: 'Keno', description: 'Pick numbers, match the draw for hits.' }
-  ,{ type: 'blackjack', label: 'Blackjack', description: 'Beat the dealer in a fast infinite-shoe round.' }
+  ,{ type: 'blackjack', label: 'Blackjack PK', description: 'Beat the dealer in a fast infinite-shoe round.' }
   ,{ type: 'rps', label: 'Rock Paper Scissors', description: 'Choose a hand and challenge the house.' }
   ,{ type: 'tower', label: 'Tower', description: 'Climb levels as the risk and multiplier rise.' }
   ,{ type: 'chicken', label: 'Chicken', description: 'Cross safe steps before finding a trap.' }
@@ -169,7 +169,7 @@ function GameVisual({ game, houseEdge, running, result, blackjackRound, blackjac
     const stagedDealerTotal = blackjackDealerVisibleCount === null ? blackjackRound?.dealerTotal : blackjackDealerVisibleCount === 0 ? '—' : blackjackHandValue(stagedDealerCards).total;
     const tableStatus = running ? 'DEALING…' : !blackjackRound ? 'PLACE A BET TO START' : blackjackRound.phase === 'insurance' ? 'INSURANCE DECISION' : blackjackRound.phase === 'player' ? `HAND ${blackjackRound.activeHandIndex + 1} · YOUR MOVE` : `${blackjackRound.outcome?.toUpperCase()} · ${blackjackRound.net >= 0 ? '+' : ''}${formatCash(blackjackRound.net)}`;
     return <div className={`visual-stage table-visual blackjack-${blackjackRound?.phase ?? 'ready'} ${running ? 'is-running' : ''}`} aria-live="polite">
-      <div className="shoe-stack">▤<small>INFINITE SHOE</small></div>
+      <div className="shoe-stack"><OriginalsMark className="shoe-brand-logo"/><small>INFINITE SHOE</small></div>
       <OriginalsMark className="table-brand-mark"/>
       <div className="dealer-hand"><small>DEALER <em key={`dealer-total-${blackjackDealerVisibleCount}-${stagedDealerTotal}`} className={blackjackDealerVisibleCount !== null ? 'dealer-total-counting' : ''}>{stagedDealerTotal ?? '—'}</em></small><div>{blackjackRound?.dealerCards.map(dealerCard)}</div></div>
       <div className="felt-mark"><b>BLACKJACK PAYS 3 TO 2</b><span>INSURANCE PAYS 2 TO 1</span></div>
