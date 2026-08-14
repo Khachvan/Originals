@@ -129,12 +129,27 @@ function GameVisual({ game, houseEdge, running, result, blackjackRound, crashVal
   if (game === 'blackjack') {
     const rankLabel = (rank?: number) => rank === 1 ? 'A' : rank === 11 ? 'J' : rank === 12 ? 'Q' : rank === 13 ? 'K' : String(rank ?? '');
     const suitLabel = (suit?: BlackjackCardView['suit']) => ({ clubs: '♣', diamonds: '♦', hearts: '♥', spades: '♠' }[String(suit)] ?? '');
-    const card = (item: BlackjackCardView, index: number, dealStep = 0) => item.hidden
-      ? <b key={`hidden-${index}`} className="playing-card hidden-card" aria-label="Hidden dealer card" style={{ '--deal-step': dealStep, '--card-position': index } as React.CSSProperties}><span>O</span></b>
-      : <b key={`${item.index}-${index}`} className={`playing-card ${item.suit === 'diamonds' || item.suit === 'hearts' ? 'red-suit' : ''}`} aria-label={`${rankLabel(item.rank)} of ${item.suit}`} style={{ '--deal-step': dealStep, '--card-position': index } as React.CSSProperties}>{rankLabel(item.rank)}<i>{suitLabel(item.suit)}</i></b>;
+    const card = (item: BlackjackCardView, index: number, dealStep = 0, motion: 'deal' | 'reveal' | 'static' = 'static', stableKey?: string) => {
+      const redSuit = item.suit === 'diamonds' || item.suit === 'hearts';
+      const classes = ['playing-card', item.hidden ? 'hidden-card' : '', redSuit ? 'red-suit' : '', motion === 'deal' ? 'dealing-card' : '', motion === 'reveal' ? 'dealer-reveal' : ''].filter(Boolean).join(' ');
+      return <b key={stableKey ?? `${item.index}-${index}`} className={classes} aria-label={item.hidden ? 'Hidden dealer card' : `${rankLabel(item.rank)} of ${item.suit}`} style={{ '--deal-step': dealStep, '--card-position': index } as React.CSSProperties}>
+        {!item.hidden && <span className="card-value">{rankLabel(item.rank)}<i>{suitLabel(item.suit)}</i></span>}
+        {(item.hidden || motion === 'reveal') && <span className="card-back-mark" aria-hidden="true">O</span>}
+      </b>;
+    };
     const initialDeal = blackjackRound?.version === 1 && blackjackRound.phase !== 'settled';
-    const dealerCard = (item: BlackjackCardView, index: number) => card(item, index, initialDeal ? index * 2 + 1 : blackjackRound?.phase === 'settled' && index >= 1 ? index - 1 : 0);
-    const playerCard = (item: BlackjackCardView, index: number) => card(item, index, initialDeal ? index * 2 : blackjackRound?.hands.length === 2 && index === 1 ? 1 : 0);
+    const dealerCard = (item: BlackjackCardView, index: number) => {
+      if (initialDeal) return card(item, index, index * 2 + 1, 'deal', `dealer-card-${index}`);
+      if (blackjackRound?.phase === 'settled' && index === 1) return card(item, index, 0, 'reveal', `dealer-card-${index}`);
+      if (blackjackRound?.phase === 'settled' && index >= 2) return card(item, index, index, 'deal', `dealer-card-${index}`);
+      return card(item, index, 0, 'static', `dealer-card-${index}`);
+    };
+    const playerCard = (item: BlackjackCardView, index: number, handIndex: number) => {
+      const splitReplacement = blackjackRound?.hands.length === 2 && index === 1;
+      const motion = initialDeal || index >= 2 || splitReplacement ? 'deal' : 'static';
+      const dealStep = initialDeal ? index * 2 : splitReplacement ? handIndex + 1 : 0;
+      return card(item, index, dealStep, motion);
+    };
     const tableStatus = running ? 'DEALING…' : !blackjackRound ? 'PLACE A BET TO START' : blackjackRound.phase === 'insurance' ? 'INSURANCE DECISION' : blackjackRound.phase === 'player' ? `HAND ${blackjackRound.activeHandIndex + 1} · YOUR MOVE` : `${blackjackRound.outcome?.toUpperCase()} · ${blackjackRound.net >= 0 ? '+' : ''}${formatCash(blackjackRound.net)}`;
     return <div className={`visual-stage table-visual blackjack-${blackjackRound?.phase ?? 'ready'} ${running ? 'is-running' : ''}`} aria-live="polite">
       <div className="shoe-stack">▤<small>INFINITE SHOE</small></div>
@@ -143,7 +158,7 @@ function GameVisual({ game, houseEdge, running, result, blackjackRound, crashVal
       <div className={`blackjack-hands ${blackjackRound?.hands.length === 2 ? 'is-split' : ''}`}>
         {(blackjackRound?.hands ?? []).map((hand, handIndex) => <div className={`player-hand ${blackjackRound?.phase === 'player' && blackjackRound.activeHandIndex === handIndex ? 'active-hand' : ''}`} key={hand.id}>
           <small>HAND {handIndex + 1} <em>{hand.total}</em>{hand.result && <strong className={`hand-result ${hand.result}`}>{hand.result}</strong>}</small>
-          <div>{hand.cards.map(playerCard)}</div>
+          <div>{hand.cards.map((item, index) => playerCard(item, index, handIndex))}</div>
           <span className="hand-wager">{formatCash(hand.wager)}{hand.doubled ? ' · DOUBLED' : hand.splitAces ? ' · SPLIT ACES' : ''}{hand.payout > 0 ? ` · Return ${formatCash(hand.payout)}` : ''}</span>
         </div>)}
         {!blackjackRound && <div className="player-hand empty-hand"><small>PLAYER <em>—</em></small><div><span>Deal to begin</span></div></div>}
@@ -394,12 +409,16 @@ export default function App() {
     }
   };
 
-  const applyBlackjackResponse = async (payload: { round: BlackjackRound; balance: number; nonce: number }) => {
+  const applyBlackjackResponse = async (payload: { round: BlackjackRound; balance: number; nonce: number }, transition: BlackjackAction | 'insurance' | 'start') => {
     setBlackjackRound(payload.round);
     setSession(current => current ? { ...current, balance: payload.balance, nonce: payload.nonce } : current);
     if (animationMode === 'advanced') {
-      const initialDealDuration = payload.round.version === 1 && payload.round.phase !== 'settled' ? 1350 : 520 + Math.max(0, payload.round.dealerCards.length - 2) * 280;
-      await new Promise(resolve => window.setTimeout(resolve, initialDealDuration));
+      const initialDeal = transition === 'start' && payload.round.version === 1 && payload.round.phase !== 'settled';
+      const extraDealerCards = Math.max(0, payload.round.dealerCards.length - 2);
+      const dealerSequenceDuration = extraDealerCards === 0 ? 775 : 638 + (extraDealerCards + 1) * 350;
+      const playerSequenceDuration = transition === 'split' ? 1338 : transition === 'insurance' ? 0 : 638;
+      const animationDuration = initialDeal ? 1688 : payload.round.phase === 'settled' ? Math.max(playerSequenceDuration, dealerSequenceDuration) : playerSequenceDuration;
+      await new Promise(resolve => window.setTimeout(resolve, animationDuration));
     }
     if (payload.round.phase === 'settled') {
       playTone(payload.round.net > 0 ? 'win' : 'lose', 'blackjack');
@@ -415,7 +434,7 @@ export default function App() {
     try {
       const requestId = window.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
       const payload = await apiFetch<{round: BlackjackRound; balance: number; nonce: number}>('/api/blackjack/start', { amount: amountInput, requestId });
-      await applyBlackjackResponse(payload);
+      await applyBlackjackResponse(payload, 'start');
     } catch (err: any) {
       setError(err.message);
       try {
@@ -435,7 +454,7 @@ export default function App() {
       if (!blackjackRound) throw new Error('No Blackjack round found');
       const requestId = window.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
       const payload = await apiFetch<{round: BlackjackRound; balance: number; nonce: number}>('/api/blackjack/insurance', { take, requestId, roundId: blackjackRound.id, version: blackjackRound.version });
-      await applyBlackjackResponse(payload);
+      await applyBlackjackResponse(payload, 'insurance');
     } catch (err: any) { setError(err.message); }
     finally { setBlackjackBusy(false); }
   };
@@ -448,7 +467,7 @@ export default function App() {
       if (!blackjackRound) throw new Error('No Blackjack round found');
       const requestId = window.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
       const payload = await apiFetch<{round: BlackjackRound; balance: number; nonce: number}>('/api/blackjack/action', { action, requestId, roundId: blackjackRound.id, version: blackjackRound.version });
-      await applyBlackjackResponse(payload);
+      await applyBlackjackResponse(payload, action);
     } catch (err: any) {
       setError(err.message);
       try {

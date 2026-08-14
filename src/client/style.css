@@ -127,5 +127,21 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 
 @media(prefers-reduced-motion:reduce){.playing-card{animation:none!important}.player-hand{transition:none!important}}
 
-/* Blackjack cards follow the committed draw order: player, dealer, player, dealer. */
-.dealer-hand .playing-card,.player-hand .playing-card{transform:rotate(calc((var(--card-position,0) - 1) * 2deg));animation:cardDeal .45s calc(var(--deal-step,0) * .28s) cubic-bezier(.18,.78,.2,1) backwards}
+/* Blackjack cards travel from the shoe in committed order; the hole card flips in place. */
+.dealer-hand .playing-card,.player-hand .playing-card{transform:rotate(calc((var(--card-position,0) - 1) * 2deg));animation:none;transform-style:preserve-3d;will-change:transform,opacity}
+.dealer-hand .playing-card{--deck-x:min(38vw,340px);--deck-y:145px}
+.player-hand .playing-card{--deck-x:min(38vw,340px);--deck-y:-115px}
+.dealer-hand .playing-card.dealing-card,.player-hand .playing-card.dealing-card{animation:cardDealFromShoe .5625s calc(var(--deal-step,0) * .35s) cubic-bezier(.16,.76,.2,1) backwards}
+.playing-card .card-value{display:block}
+.playing-card .card-back-mark{position:absolute;z-index:2;inset:50% auto auto 50%;display:grid;place-items:center;width:30px;height:30px;border:1px solid #fff8;border-radius:50%;color:#fff;font-weight:950;opacity:0;transform:translate(-50%,-50%)}
+.playing-card.hidden-card .card-back-mark{opacity:1}
+.playing-card.dealer-reveal{transform-origin:center;animation:dealerHoleReveal .7s cubic-bezier(.35,.02,.22,1) both}
+.playing-card.dealer-reveal .card-value{animation:dealerFaceReveal .7s step-end both}
+.playing-card.dealer-reveal .card-back-mark{animation:dealerBackHide .7s step-end both}
+@keyframes cardDealFromShoe{from{opacity:0;transform:translate(var(--deck-x),var(--deck-y)) scale(.78) rotate(18deg)}65%{opacity:1}}
+@keyframes dealerHoleReveal{0%{transform:rotate(calc((var(--card-position,0) - 1) * 2deg)) rotateY(0);border:4px solid #eef2f4;background:repeating-linear-gradient(45deg,#16598a 0 6px,#0d3d64 6px 12px);color:#fff}49%{transform:rotate(calc((var(--card-position,0) - 1) * 2deg)) rotateY(90deg);border:4px solid #eef2f4;background:repeating-linear-gradient(45deg,#16598a 0 6px,#0d3d64 6px 12px);color:#fff}50%{transform:rotate(calc((var(--card-position,0) - 1) * 2deg)) rotateY(-90deg);border:0 solid transparent;background:#f8f6ef}100%{transform:rotate(calc((var(--card-position,0) - 1) * 2deg)) rotateY(0);border:0 solid transparent;background:#f8f6ef}}
+@keyframes dealerFaceReveal{0%,49%{opacity:0}50%,100%{opacity:1}}
+@keyframes dealerBackHide{0%,49%{opacity:1}50%,100%{opacity:0}}
+@media(max-width:700px){.dealer-hand .playing-card{--deck-x:42vw;--deck-y:105px}.player-hand .playing-card{--deck-x:42vw;--deck-y:-82px}.playing-card .card-back-mark{width:22px;height:22px;font-size:12px}}
+@media(max-width:380px){.shoe-stack{right:-2%;display:grid;transform:scale(.55)}}
+@media(prefers-reduced-motion:reduce){.playing-card .card-value,.playing-card .card-back-mark{animation:none!important}}
