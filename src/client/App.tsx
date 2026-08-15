@@ -181,7 +181,7 @@ function GameVisual({ game, houseEdge, running, result, blackjackRound, blackjac
         </div>)}
         {!blackjackRound && <div className="player-hand empty-hand"><small>PLAYER <em>—</em></small><div><span>Deal to begin</span></div></div>}
       </div>
-      {blackjackRound?.phase === 'settled' && <div className={`blackjack-result-toast ${blackjackRound.net > 0 ? 'win' : blackjackRound.net < 0 ? 'loss' : 'push'}`} role="status"><span>{blackjackRound.net > 0 ? 'WIN' : blackjackRound.net < 0 ? 'LOSS' : 'PUSH'}</span><strong>{blackjackRound.net > 0 ? '+' : ''}{formatCash(blackjackRound.net)}</strong></div>}
+      {blackjackRound?.phase === 'settled' && !running && <div className={`blackjack-result-toast ${blackjackRound.net > 0 ? 'win' : blackjackRound.net < 0 ? 'loss' : 'push'}`} role="status"><span>{blackjackRound.net > 0 ? 'WIN' : blackjackRound.net < 0 ? 'LOSS' : 'PUSH'}</span><strong>{blackjackRound.net > 0 ? '+' : ''}{formatCash(blackjackRound.net)}</strong></div>}
       <div className="bet-ring">BET</div><div className="stage-status">{tableStatus}</div>
     </div>;
   }
